@@ -99,20 +99,20 @@
   and DIR of both drivers in parallel on these pins. Z stays on GPIO
   pulses, it steps rarely (layer changes, Z-hop).
 
-  Z_MIN is also the input of a Z probe (BLTouch, see BLTOUCH below), which
-  then replaces the Z endstop switch.
+  Z_MIN is also the input of a Z probe (BLTouch or inductive sensor, see
+  BLTOUCH and INDUCTIVE_PROBE below), which then replaces the Z endstop
+  switch. Z_INVERT_MIN is for the switch; with a probe config_wrapper.h
+  sets the polarity of the probe instead.
 */
 #define Z_STEP_PIN               PB_12   // Z_STEP  (D46) + E1_STEP (D36)
 #define Z_DIR_PIN                PB_13   // Z_DIR   (D48) + E1_DIR  (D34)
 #define Z_MIN_PIN                PB_15   // Z_MIN   (D18)
 //#define Z_INVERT_DIR                   // INVERT_Z_DIR false
-#ifndef BLTOUCH
-  #define Z_INVERT_MIN                   // Z_MIN_ENDSTOP_INVERTING true
-#endif                                   // BLTouch: active high
+#define Z_INVERT_MIN                     // Z_MIN_ENDSTOP_INVERTING true
 
 /** \def Z_STEPPER_ALIGN Z2_STEP_PIN
   Independent Z alignment (G34, like Marlin's Z_STEPPER_AUTO_ALIGN), needs
-  BLTOUCH: the STEP input of the Z2 driver moves from PB12 to PC15 (remove
+  a probe (BLTOUCH or INDUCTIVE_PROBE): the STEP input of the Z2 driver moves from PB12 to PC15 (remove
   the 32.768 kHz crystal on PC14/PC15), DIR stays in parallel on PB13. Z
   and Z2 still step together, G34 raises one of them alone until the
   gantry is parallel to the bed. Probe points and lead screw positions:
@@ -203,6 +203,29 @@
 */
 //#define BLTOUCH
 #define BLTOUCH_SERVO_PIN        PC_13
+
+/** \def INDUCTIVE_PROBE INDUCTIVE_PROBE_ACTIVE_HIGH
+  Inductive (or capacitive) proximity sensor instead of the BLTouch, like
+  the Prusa PINDA or an LJ12A3-4-Z: no servo, nothing to deploy, it
+  switches when it comes near the metal bed (steel sheet or aluminium,
+  not glass). Same features: G28 Z homes with it, G29, G30, G34.
+
+  Wiring: signal to PB15 = Z_MIN_PIN (5 V tolerant, internal pull-up with
+  USE_INTERNAL_PULLUPS). Take an NPN type (open collector, pulls the
+  signal to GND when metal is near): the sensor may be powered with
+  6..36 V then, PB15 only sees the pull-up and GND. NPN NO (normally
+  open): active low, the default. NPN NC or a PNP sensor through a
+  voltage divider / optocoupler to 3.3 V: INDUCTIVE_PROBE_ACTIVE_HIGH.
+  Never connect a PNP output powered with 12 V directly to the pin.
+
+  Probe offset Z (M851 Z) of an inductive sensor: minus its switching
+  distance above the bed, typically -1..-4 mm. The distance depends on
+  the temperature of the sensor and of the bed: measure the offset at
+  printing temperatures, probe with the bed hot. Choose BLTOUCH or
+  INDUCTIVE_PROBE, not both.
+*/
+//#define INDUCTIVE_PROBE
+//#define INDUCTIVE_PROBE_ACTIVE_HIGH
 
 /*
   Reserved for planned features (the firmware doesn't use them yet):

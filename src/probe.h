@@ -1,5 +1,6 @@
 /** \file
-  \brief Z probe (BLTouch): homing Z with the probe, G30, G29, M401/M402.
+  \brief Z probe (BLTouch or inductive sensor): homing Z with the probe,
+  G30, G29, M401/M402.
 */
 
 #ifndef _PROBE_H
@@ -17,10 +18,13 @@ extern int32_t probe_offset[3];
 /// Configured defaults of probe_offset (Z_PROBE_OFFSET_*).
 void probe_defaults(void);
 
-/// Servo and BLTouch start-up (stow).
+/// Servo and BLTouch start-up (stow); nothing for an inductive sensor.
 void probe_init(void);
 
-/// M401 / M402. \return 1 on success.
+/**
+  M401 / M402. BLTouch: pin down / up. Inductive sensor: deploy checks it
+  isn't active yet, stow does nothing. \return 1 on success.
+*/
 uint8_t probe_deploy(void);
 uint8_t probe_stow(void);
 

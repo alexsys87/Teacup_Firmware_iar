@@ -59,7 +59,7 @@
   Before homing X or Y (G28, G28 X, G28 Y), Z goes up to this height (mm,
   Marlin's Z_HOMING_HEIGHT), never down. The nozzle and a BLTouch pin
   don't drag over the bed or clips then. With Z not homed yet the current
-  Z counts as right (0 after power on). With BLTOUCH G28 Z also homes X
+  Z counts as right (0 after power on). With a probe G28 Z also homes X
   and Y first if they aren't (safe Z homing at Z_SAFE_HOMING_X/Y, default
   the bed center). 0 = off.
 */
@@ -224,7 +224,8 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,
-  Y_MIN..Y_MAX). G29 probes it (BLTOUCH in the board file), M421 sets
+  Y_MIN..Y_MAX). G29 probes it (BLTOUCH / INDUCTIVE_PROBE in the board
+  file), M421 sets
   points by hand. M420 S1/S0 on/off, M420 Z fade height: the correction
   fades out linearly up to this height (mm, 0 = never). M500 stores it.
   Moves are split at the grid lines, so Z follows the surface.
@@ -236,12 +237,13 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define LEVELING_FADE_HEIGHT     10.0
 
 /** \def Z_PROBE_OFFSET_X Z_PROBE_OFFSET_Y Z_PROBE_OFFSET_Z
-  BLTouch position relative to the nozzle, mm (Marlin
+  Probe (BLTouch or inductive sensor) position relative to the nozzle, mm (Marlin
   NOZZLE_TO_PROBE_OFFSET). Z is negative: minus the nozzle height above the
   bed when the probe triggers. Measure Z: M851 Z-5, G28, lower the nozzle
   with G1 Z... until a sheet of paper just drags, read Z (M114), e.g. 3.40:
   offset = 3.40 - 5 = -1.60, so M851 Z-1.60, M500. Only used with BLTOUCH
-  (board file). The fine tuning while printing is M290 (Z offset).
+  or INDUCTIVE_PROBE (board file). The fine tuning while printing is M290
+  (Z offset).
 */
 #define Z_PROBE_OFFSET_X         0.0
 #define Z_PROBE_OFFSET_Y         0.0

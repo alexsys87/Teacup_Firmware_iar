@@ -19,6 +19,8 @@ pos = {'x': 50.0, 'y': 60.0, 'z': 8.0, 'e': 0.0, 'z2': 8.0}
 # X = S2, the nozzle height is on the straight line between them.
 DUAL = {'on': False, 'S1': -35.0, 'S2': 255.0}
 PROBE = {'dx': -30.0, 'dy': -10.0, 'h': 1.5}    # tip below the nozzle by h
+# Inductive sensor (kind 'inductive'): a level, active while the sensing
+# face is within h of the bed below it; NPN NO = active low.
 servo = {'us': 0, 'deployed': False, 'triggered': False, 'cmds': [],
          'pin_set': 0, 'pin_reset': 0}
 pins = {}
@@ -67,6 +69,16 @@ def _track():
         track['max'] = max(track['max'], g)
         track['n'] += 1
 
+def _inductive():
+    if PROBE.get('kind') != 'inductive':
+        return
+    px, py = pos['x'] + PROBE['dx'], pos['y'] + PROBE['dy']
+    near = nz(px) - PROBE['h'] <= bed(px, py)
+    if near and not servo['triggered']:
+        triggers.append((px, py, nz(px)))
+    servo['triggered'] = near
+    _pin('B', 15, near if PROBE.get('active_high') else not near)
+
 def _release():
     if servo['triggered']:
         servo['triggered'] = False
@@ -76,7 +88,10 @@ def init(machine):
     global m
     m = machine
     _endstops()
-    _pin('B', 15, False)
+    if PROBE.get('kind') == 'inductive':
+        _inductive()
+    else:
+        _pin('B', 15, False)
 
 def step_x(machine, value):
     global m
@@ -86,6 +101,7 @@ def step_x(machine, value):
     d = 1 if (_odr('A') >> 9) & 1 else -1
     pos['x'] += d / SPM['x']
     _endstops()
+    _inductive()
     _track()
 
 def step_y(machine, value):
@@ -96,6 +112,7 @@ def step_y(machine, value):
     d = 1 if (_odr('A') >> 10) & 1 else -1
     pos['y'] += d / SPM['y']
     _endstops()
+    _inductive()
     _track()
 
 def step_e(machine, value):
@@ -121,7 +138,8 @@ def _z_step(screws):
     k = ('up' if up else 'down') + ('' if screws[0] == 'z' else '2')
     zsteps[k] += 1
     if up:
-        _release()
+        if PROBE.get('kind') != 'inductive':
+            _release()
     else:
         if servo['deployed'] and not servo['triggered']:
             px, py = pos['x'] + PROBE['dx'], pos['y'] + PROBE['dy']
@@ -131,6 +149,7 @@ def _z_step(screws):
                 servo['triggered'] = True
                 triggers.append((px, py, nz(px)))
                 _pin('B', 15, True)
+    _inductive()
     _track()
 
 def servo_ccr(machine, value):

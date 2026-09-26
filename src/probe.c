@@ -1,5 +1,10 @@
 /** \file
-  \brief Z probe (BLTouch), see probe.h.
+  \brief Z probe (BLTouch or inductive sensor), see probe.h.
+
+  Inductive / capacitive sensor (INDUCTIVE_PROBE): the signal on
+  Z_MIN_PIN is a level, active while the sensor is near the bed. Nothing
+  to deploy or stow; before probing it must not be active yet. Probing,
+  offsets, samples and the mesh work as with the BLTouch below.
 
   BLTouch commands by servo pulse (M280 P0 S<angle>): 10 deploy, 90 stow,
   160 alarm release / reset, 120 self test, 60 switch mode. The probe
@@ -48,6 +53,7 @@ void probe_defaults(void) {
   probe_offset[Z] = (int32_t)(Z_PROBE_OFFSET_Z * 1000.);
 }
 
+#ifdef BLTOUCH
 /// Wait, keep the printer running (temperatures, host, watchdog).
 static void probe_wait_ms(uint32_t ms) {
   uint32_t start = clock_millis();
@@ -60,6 +66,7 @@ static void bltouch_cmd(uint16_t angle) {
   servo_write_angle(angle);
   probe_wait_ms(BLTOUCH_DELAY);
 }
+#endif
 
 /// Current probe signal (1 = triggered or alarm).
 static uint8_t probe_triggered(void) {
@@ -73,10 +80,32 @@ static uint8_t probe_triggered(void) {
 }
 
 void probe_init(void) {
-  servo_init();
-  servo_write_angle(BLTOUCH_STOW);
+  #ifdef BLTOUCH
+    servo_init();
+    servo_write_angle(BLTOUCH_STOW);
+  #endif
 }
 
+#ifdef INDUCTIVE_PROBE
+/**
+  Inductive sensor: always "deployed". It must not see the bed yet, or
+  the nozzle is too low for probing (or the sensor / its wiring is
+  broken: an NPN NO sensor without power reads as triggered here).
+*/
+uint8_t probe_deploy(void) {
+  queue_wait();
+  if (probe_triggered()) {
+    serial_writestr("Error:Probe triggered before probing (too low? wiring?)\n");
+    return 0;
+  }
+  return 1;
+}
+
+uint8_t probe_stow(void) {
+  queue_wait();
+  return 1;
+}
+#else /* BLTOUCH */
 uint8_t probe_deploy(void) {
   // Never while moving: after a trigger the nozzle is still below the
   // trigger point until the raise is done, the pin would hit the bed.
@@ -105,6 +134,7 @@ uint8_t probe_stow(void) {
   }
   return 1;
 }
+#endif /* BLTOUCH */
 
 /// Move the nozzle to X, Y, Z (um, current coordinates), E stays.
 static void probe_goto(int32_t x, int32_t y, int32_t z, uint32_t feed) {
