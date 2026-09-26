@@ -112,7 +112,7 @@ pin('B', 3, False); pin('B', 15, False)
 mark('m_es_pressed'); send('M119\n'); run('0.05')
 pin('B', 3, True); pin('B', 15, True); run('0.01')
 
-# Heaters: PWM frequencies, PID hotend, bang-bang bed.
+# Heaters: PWM frequencies, PID hotend, PID bed with slow software PWM.
 read32('TIM10_PSC', 0x40014428); read32('TIM11_PSC', 0x40014828)
 mark('h_start'); send('M104 S200\nM140 S60\n'); run('0.6')
 read32('CCR_COLD', 0x40014434)
@@ -120,11 +120,15 @@ read32('ODR_BED_COLD', 0x40020414)
 adc(c_to_adc(200.0), c_to_adc(70.0)); run('1.0')
 read32('CCR_HOT', 0x40014434)
 read32('ODR_BED_70', 0x40020414)
-adc(c_to_adc(200.0), c_to_adc(59.0)); run('0.6')
-read32('ODR_BED_59', 0x40020414)
-adc(c_to_adc(200.0), c_to_adc(55.0)); run('0.6')
-read32('ODR_BED_55', 0x40020414)
-mark('h_end'); send('M104 S0\nM140 S0\nM105\n'); run('0.1')
+# Bed PID, slow software PWM 2 Hz on PB0: start again at 59 C (1 C below
+# the target, no D kick from a temperature jump), Kp 70 -> ~28 % duty.
+send('M140 S0\n'); run('0.1')
+adc(c_to_adc(200.0), c_to_adc(59.0)); run('0.3')
+send('M140 S60\n'); run('0.3')
+mark('h_bed_pid'); run('2.0')
+mark('h_bed_pid_end'); send('M104 S0\nM140 S0\n'); run('0.1')
+read32('ODR_BED_OFF', 0x40020414)
+mark('h_end'); send('M105\n'); run('0.1')
 mark('end')
 cmd('quit')
 
@@ -204,10 +208,21 @@ check('hotend PWM 100 Hz (TIM10), fan 500 Hz (TIM11)', abs(f4 - 100) < 1 and abs
 check('PID: full power when cold', v.get('CCR_COLD') == 1020, v.get('CCR_COLD'))
 check('PID: less power at target', v.get('CCR_HOT', 1020) < 1020, v.get('CCR_HOT'))
 bed = lambda k: (v.get(k, 0) >> 0) & 1      # PB0
-check('bed bang-bang: 25 C on', bed('ODR_BED_COLD') == 1, hex(v.get('ODR_BED_COLD', 0)))
-check('bed bang-bang: 70 C off', bed('ODR_BED_70') == 0, hex(v.get('ODR_BED_70', 0)))
-check('bed bang-bang: 59 C (in hysteresis) stays off', bed('ODR_BED_59') == 0, hex(v.get('ODR_BED_59', 0)))
-check('bed bang-bang: 55 C on again', bed('ODR_BED_55') == 1, hex(v.get('ODR_BED_55', 0)))
+check('bed PID: 25 C (35 below) full on', bed('ODR_BED_COLD') == 1, hex(v.get('ODR_BED_COLD', 0)))
+check('bed PID: 70 C (10 above) off', bed('ODR_BED_70') == 0, hex(v.get('ODR_BED_70', 0)))
+# PB0 is written every 10 ms tick: BSRR bit 0 = on, bit 16 = off.
+ticks = []
+for l in sections.get('h_bed_pid', []):
+    m = re.search(r'gpioPortB: .*WriteUInt32 to 0x18 .*value 0x([0-9A-F]+)', l)
+    if m:
+        val = int(m.group(1), 16)
+        if val & 1: ticks.append(1)
+        elif val & 0x10000: ticks.append(0)
+rises = sum(1 for a, b in zip(ticks, ticks[1:]) if b and not a)
+duty = sum(ticks) / len(ticks) if ticks else 0
+check('bed PID 1 C below: ~28 % duty', 180 <= len(ticks) <= 220 and 0.2 <= duty <= 0.36, (len(ticks), round(duty, 3)))
+check('  slow PWM 2 Hz: 4 pulses in 2 s', 3 <= rises <= 5, rises)
+check('  M140 S0: off', bed('ODR_BED_OFF') == 0, hex(v.get('ODR_BED_OFF', 0)))
 check('no error / reset', 'Error:' not in out and out.count('] start') == 1, out.count('] start'))
 print('\n%d failure(s)' % fails)
 sys.exit(1 if fails else 0)

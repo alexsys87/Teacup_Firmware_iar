@@ -39,6 +39,9 @@ void temp_sensor_tick(void);
 
 void temp_heater_tick(void);
 
+/// PID loops, every 100 ms.
+void temp_pid_tick(void);
+
 void temp_residency_tick(void);
 
 void temp_periodic_config(uint8_t secs, temp_sensor_t index);
@@ -72,6 +75,7 @@ void temp_print(temp_sensor_t index);
   /// Test hook for TT_DUMMY sensors, see temp.c.
   extern volatile int32_t temp_dummy_force;
   extern volatile int32_t temp_dummy_plant;
+  extern volatile int32_t temp_dummy_fan_loss;
 #endif
 
 #endif	/* _TEMP_H */

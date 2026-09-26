@@ -61,7 +61,7 @@ typedef struct {
                                 ///< G2/G3 radius in um)
   int32_t           P_milli;    ///< P word in thousandths (M301/M304 Kp)
   int32_t           I_milli;    ///< I word in thousandths (M301/M304 Ki,
-                                ///< G2/G3 center offset X)
+                                ///< G2/G3 center offset X), M852: millionths
   int32_t           J_milli;    ///< J word in thousandths (G2/G3 offset Y)
   int32_t           D_milli;    ///< D word in thousandths (M301/M304 Kd)
   uint16_t          C;          ///< C word (M303 cycles)
@@ -69,7 +69,7 @@ typedef struct {
   int32_t           U_milli;    ///< U word in thousandths (M600 unload length)
   int32_t           L_milli;    ///< L word in thousandths (M600 load length)
   int32_t           K_value;    ///< K word in 1/10000 (M900 linear advance)
-  int32_t           F_milli;    ///< F word in thousandths for M593 (Hz)
+  int32_t           F_milli;    ///< F word in thousandths for M593, M301, M207, M208, M425
   uint16_t          P;          ///< P word (various uses)
 
 	uint16_t						G;				///< G command number

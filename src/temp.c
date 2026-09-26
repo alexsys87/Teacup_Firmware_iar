@@ -63,7 +63,16 @@ static struct {
 
   uint8_t       age;             ///< 250 ms ticks since the last valid reading.
   uint8_t       manual;          ///< Heater controlled elsewhere (M303).
+  float         temp_c;          ///< Last reading in C, not rounded (PID).
 } temp_sensors_runtime[NUM_TEMP_SENSORS];
+
+/**
+  Temperature of the latest conversion in C, as calculated, before rounding
+  to quarter degrees. Set by conversions which have it (thermistors, the
+  simulated hotend), used once by temp_sensor_tick().
+*/
+static float conv_c;
+static uint8_t conv_c_set;
 
 /** \def TEMP_EWMA
 
@@ -105,6 +114,7 @@ static uint8_t          periodic_temp_timer;
   static uint16_t dummy_temp[NUM_TEMP_SENSORS];
   volatile int32_t temp_dummy_force = -1;
   volatile int32_t temp_dummy_plant = 0;
+  volatile int32_t temp_dummy_fan_loss = 0;
 #endif
 
 /// Set up temp sensors.
@@ -235,6 +245,8 @@ static uint16_t thermistor_to_qc(uint8_t th, uint32_t adc, uint32_t adc_max) {
     return 0;
   if (t >= 1000.0f)
     return THERMISTOR_SHORTED;
+  conv_c = t;
+  conv_c_set = 1;
   return (uint16_t)(t * 4.0f + 0.5f);
 }
 #endif /* TEMP_THERMISTOR || TEMP_MCP3008 */
@@ -396,11 +408,15 @@ static uint16_t temp_read_ad595(temp_sensor_t i) {
 /**
   Test hook: temp_dummy_plant = 1 turns the dummy sensor into a simulated
   hotend: 4 C/s heating at full power, cooling with a time constant of
-  40 s towards 25 C, 1 s dead time. Used to test PID and M303.
+  40 s towards 25 C, 1 s dead time. The part fan (HEATER_FAN) cools the hotend by
+  another temp_dummy_fan_loss / 1000 C/s at full speed, also 1 s delayed
+  (spin-up). Used to test PID,
+  its fan compensation and M303.
 */
 static void dummy_plant(temp_sensor_t i) {
   static float t[NUM_TEMP_SENSORS];
   static uint8_t delay_line[NUM_TEMP_SENSORS][4];
+  static uint8_t fan_line[NUM_TEMP_SENSORS][4];
   static uint8_t pos[NUM_TEMP_SENSORS];
   static uint32_t last[NUM_TEMP_SENSORS];
   uint32_t now = clock_millis();
@@ -413,13 +429,23 @@ static void dummy_plant(temp_sensor_t i) {
   while (now - last[i] >= 250) {
     uint8_t out = (h < NUM_HEATERS) ? heaters_runtime[h].heater_output : 0;
     uint8_t delayed = delay_line[i][pos[i]];
+    float fan = (float)fan_line[i][pos[i]] / 255.0f *
+                (float)temp_dummy_fan_loss / 1000.0f;
 
+    fan_line[i][pos[i]] = 0;
+    #if defined HEATER_FAN && defined HEATER_EXTRUDER
+      if (h == HEATER_EXTRUDER)
+        fan_line[i][pos[i]] = heaters_runtime[HEATER_FAN].heater_output;
+    #endif
     delay_line[i][pos[i]] = out;
     pos[i] = (pos[i] + 1) & 3;
-    t[i] += 0.25f * (4.0f * (float)delayed / 255.0f - (t[i] - 25.0f) / 40.0f);
+    t[i] += 0.25f * (4.0f * (float)delayed / 255.0f - (t[i] - 25.0f) / 40.0f -
+                     fan);
     last[i] += 250;
   }
   dummy_temp[i] = (uint16_t)(t[i] * 4.0f + 0.5f);
+  conv_c = t[i];
+  conv_c_set = 1;
 }
 
 static uint16_t temp_read_dummy(temp_sensor_t i) {
@@ -497,7 +523,8 @@ static void run_pid_loop(int i) {
   if (temp_sensors[i].heater < NUM_HEATERS && ! temp_sensors_runtime[i].manual) {
     heater_tick(temp_sensors[i].heater, temp_sensors[i].temp_type,
                 temp_sensors_runtime[i].last_read_temp,
-                temp_sensors_runtime[i].target_temp);
+                temp_sensors_runtime[i].target_temp,
+                temp_sensors_runtime[i].temp_c);
   }
 }
 
@@ -514,25 +541,33 @@ void temp_sensor_tick(void) {
         temp_sensors_runtime[i].active = 1;
 
     if (temp_sensors_runtime[i].active) {
-      uint16_t temp = read_temp_sensor((temp_sensor_t)i);
+      uint16_t temp;
+      float c;
 
+      conv_c_set = 0;
+      temp = read_temp_sensor((temp_sensor_t)i);
       if (temp == TEMP_NOT_READY)
         continue;
 
       temp_sensors_runtime[i].age = 0;
+      c = conv_c_set ? conv_c : (float)temp * 0.25f;
 
       // Handle moving average.
       temp_sensors_runtime[i].last_read_temp = (uint16_t)(
         (EWMA_ALPHA * temp +
          (EWMA_SCALE - EWMA_ALPHA) * temp_sensors_runtime[i].last_read_temp) /
         EWMA_SCALE);
+      if (temp_sensors_runtime[i].temp_c == 0.0f)
+        temp_sensors_runtime[i].temp_c = c;
+      else
+        temp_sensors_runtime[i].temp_c +=
+          (float)EWMA_ALPHA / (float)EWMA_SCALE *
+          (c - temp_sensors_runtime[i].temp_c);
 
       if ( ! TEMP_READ_CONTINUOUS) {
         /**
-          In one-shot mode we only update temps when triggered by the
-          heater_tick for PID loops. So here we run the PID loop through a
-          cycle. This must only be done four times per second to keep the PID
-          values sane.
+          In one-shot mode we only update temps when triggered by
+          temp_pid_tick(). So here we run the PID loop through a cycle.
         */
         run_pid_loop(i);
       }
@@ -541,13 +576,13 @@ void temp_sensor_tick(void) {
 }
 
 /**
-  Called every 250ms from clock.c. Update heaters for all sensors.
+  Called every 250ms from clock.c. Thermal protection for all sensors
+  driving a heater.
 */
 void temp_heater_tick(void) {
   uint8_t i;
 
   for (i = 0; i < NUM_TEMP_SENSORS; i++) {
-    // Thermal protection for sensors driving a heater.
     if (temp_sensors[i].heater < NUM_HEATERS) {
       if (temp_sensors_runtime[i].age < 255)
         temp_sensors_runtime[i].age++;
@@ -556,14 +591,23 @@ void temp_heater_tick(void) {
                                temp_sensors_runtime[i].age,
         heaters_runtime[temp_sensors[i].heater].heater_output != 0);
     }
+  }
+}
 
+/**
+  Called every 100 ms from clock.c: PID loops at 10 Hz. Sensors read
+  continuously get their loop run right away, the others a new reading
+  first; they run the loop when it's done (at most as often as the sensor
+  can deliver, e.g. MAX6675 every 220 ms).
+*/
+void temp_pid_tick(void) {
+  uint8_t i;
+
+  for (i = 0; i < NUM_TEMP_SENSORS; i++) {
     if (TEMP_READ_CONTINUOUS)
       run_pid_loop(i);
-    else {
-      // Signal all the temperature probes to begin reading. Each will run the
-      // pid loop for us when it completes.
+    else if ( ! temp_sensors_runtime[i].active)
       temp_sensors_runtime[i].active = 1;
-    }
   }
 }
 
@@ -780,6 +824,13 @@ void temp_print(temp_sensor_t index) {
 			sersendf_P((" B:"));
       single_temp_print(TEMP_SENSOR_bed);
 		#endif
+    // Heater outputs 0..255, like Marlin (hosts show them as power).
+    #ifdef HEATER_EXTRUDER
+      sersendf_P((" @:%su"), heaters_runtime[HEATER_EXTRUDER].heater_output);
+    #endif
+    #ifdef HEATER_BED
+      sersendf_P((" B@:%su"), heaters_runtime[HEATER_BED].heater_output);
+    #endif
 	}
 	else {
 		if (index >= NUM_TEMP_SENSORS)

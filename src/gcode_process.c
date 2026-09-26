@@ -30,6 +30,7 @@
 #include "status.h"
 #include "beeper.h"
 #include "dda_maths.h"
+#include "dda_kinematics.h"
 #include "settings.h"
 #include "flash_store.h"
 #include "pid_autotune.h"
@@ -927,6 +928,13 @@ void process_gcode_command(void) {
           #endif
 				if ( ! next_target.seen_S)
 					break;
+        #ifdef HEATER_FAN
+          // The part fan gets kick-start and the minimum PWM.
+          if (next_target.P == HEATER_FAN) {
+            fan_set(next_target.S > 255 ? 255 : next_target.S);
+            break;
+          }
+        #endif
         heater_set((heater_t)next_target.P, next_target.S);
 				break;
 
@@ -943,6 +951,12 @@ void process_gcode_command(void) {
 					#else
 						next_target.P = 0;
 					#endif
+				#ifdef HEATER_FAN
+					if (next_target.P == HEATER_FAN) {
+						fan_set(0);
+						break;
+					}
+				#endif
 				heater_set((heater_t)next_target.P, 0);
 				break;
 
@@ -1435,15 +1449,88 @@ void process_gcode_command(void) {
         break;
       #endif
 
+      #ifdef SKEW_CORRECTION
+      case 852:
+        //? --- M852: XY skew correction ---
+        //?
+        //? Example: M852 I-0.0012
+        //?
+        //? I (or S): skew factor, the tangent of the angle between the Y
+        //? axis and the perpendicular to X, like Marlin. Motor X = X - Y * I.
+        //? Range -0.1..0.1, 0 = off. The current position keeps its
+        //? coordinates. Without parameters: report (see M503).
+        //?
+        if (next_target.seen_I || next_target.seen_S) {
+          int32_t k = next_target.seen_I ? next_target.I_milli :
+                                           next_target.S * 1000000L;
+
+          if (k < -100000L || k > 100000L) {
+            serial_writestr("echo:M852 I out of range (-0.1..0.1)\n");
+            break;
+          }
+          queue_wait();
+          settings.skew_xy = k;
+          kinematics_update();
+          {
+            // Same place, new motor coordinates for X and Y (Z unchanged,
+            // it may carry babysteps and the mesh correction).
+            axes_int32_t st;
+
+            axes_um_to_steps(startpoint.axis, st);
+            startpoint_steps.axis[X] = st[X];
+            startpoint_steps.axis[Y] = st[Y];
+          }
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
+      #ifdef BACKLASH_COMPENSATION
+      case 425:
+        //? --- M425: Z backlash compensation ---
+        //?
+        //? Example: M425 Z0.1 F1
+        //?
+        //? Z: backlash of the Z axis in mm (0..5), F: fraction of it to
+        //? correct (0..1, default 1), like Marlin. When Z reverses, that
+        //? many extra steps take up the play. Without parameters: report.
+        //?
+        if (next_target.seen_Z || next_target.seen_F) {
+          if (next_target.seen_Z) {
+            int32_t z = raw_axis[Z];
+
+            restore_axis_word(Z);
+            if (z >= 0 && z <= 5000)
+              settings.backlash_z = (uint32_t)z;
+            else
+              serial_writestr("echo:M425 Z out of range (0..5)\n");
+          }
+          if (next_target.seen_F) {
+            if (next_target.F_milli >= 0 && next_target.F_milli <= 1000)
+              settings.backlash_f = (uint32_t)next_target.F_milli;
+            else
+              serial_writestr("echo:M425 F out of range (0..1)\n");
+          }
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
       case 301:
       case 304:
         //? --- M301: Set hotend PID, M304: Set bed PID ---
         //?
-        //? Example: M301 P22.2 I1.08 D114
+        //? Example: M301 P22.2 I1.08 D114 F30
         //?
         //? Marlin units (Kp, Ki and Kd per second). Converted to Teacup's
         //? internal units: P * 256, I * 64, D * 128, I limit for the full
-        //? output range. Without parameters: report.
+        //? output range. M301 F: feed-forward for the part fan, PWM counts
+        //? (0..255) the hotend heater gets more at M106 S255, proportionally
+        //? less at lower fan speeds. Without parameters: report.
         //?
         {
           heater_t h = (heater_t)NUM_HEATERS;
@@ -1469,7 +1556,15 @@ void process_gcode_command(void) {
           }
           if (next_target.seen_D)
             pid_set_d(h, (int32_t)(((int64_t)next_target.D_milli * 128) / 1000));
-          if ( ! next_target.seen_P && ! next_target.seen_I && ! next_target.seen_D)
+          // M301 F: part fan feed-forward, PWM counts at full fan speed.
+          if (next_target.seen_F && next_target.M == 301) {
+            if (next_target.F_milli >= 0 && next_target.F_milli <= 255000L)
+              pid_set_fan_ff((uint32_t)(next_target.F_milli / 10));
+            else
+              serial_writestr("echo:M301 F out of range (0..255)\n");
+          }
+          if ( ! next_target.seen_P && ! next_target.seen_I &&
+               ! next_target.seen_D && ! next_target.seen_F)
             settings_report();
         }
         break;

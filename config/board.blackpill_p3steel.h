@@ -267,12 +267,15 @@ DEFINE_TEMP_SENSOR(bed,      TT_THERMISTOR, PB_1,  THERMISTOR_epcos100k)  // T1 
   frequency.
 
   Hotend: 100 Hz hardware PWM, low frequency keeps MOSFET switching losses
-  low. Bed: on/off, it runs bang-bang (BANG_BANG_BED in the printer config)
-  like in Marlin. Fan: 500 Hz.
+  low. Bed: PB0 has TIM3_CH3 only, but TIM3 drives the E pulses. So it gets
+  slow software PWM (PB_0_GPIO = PB0 without its timer), 'pwm' 2 = 2 Hz
+  (2..10 possible): 500 ms period, duty
+  in 10 ms steps, 4 switching events per second at most. For bang-bang
+  (BANG_BANG_BED in the printer config) this acts like on/off. Fan: 500 Hz.
 */
 //            name      pin         invert  pwm      max_pwm
 DEFINE_HEATER(extruder, PB_8_TIM10, 0,      100,     100)   // TIM10_CH1
-DEFINE_HEATER(bed,      PB_0,       0,      0,       100)   // on/off
+DEFINE_HEATER(bed,      PB_0_GPIO,  0,      2,       100)   // slow soft PWM
 DEFINE_HEATER(fan,      PB_9_TIM11, 0,      500,     100)   // TIM11_CH1
 
 #define HEATER_EXTRUDER HEATER_extruder

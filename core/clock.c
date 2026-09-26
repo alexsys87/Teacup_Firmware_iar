@@ -31,10 +31,11 @@
 
 /**
   Every time our clock fires we increment this,
-  so we know when 10ms/250ms/1s has elapsed.
+  so we know when 10ms/100ms/250ms/1s has elapsed.
 */
 static volatile uint32_t clock_ms = 0;
 static uint_fast8_t clock_counter_10ms = 0;
+static uint_fast8_t clock_counter_100ms = 0;
 static uint_fast8_t clock_counter_250ms = 0;
 static uint_fast8_t clock_counter_1s = 0;
 
@@ -42,6 +43,7 @@ static uint_fast8_t clock_counter_1s = 0;
   Flags to tell clock_poll() when above have elapsed.
 */
 static volatile uint_fast8_t clock_flag_10ms = 0;
+static volatile uint_fast8_t clock_flag_100ms = 0;
 static volatile uint_fast8_t clock_flag_250ms = 0;
 static volatile uint_fast8_t clock_flag_1s = 0;
 
@@ -57,6 +59,12 @@ void clock_tick(void) {
   if (clock_counter_10ms >= 10) {
     clock_counter_10ms -= 10;
     clock_flag_10ms = 1;
+
+    clock_counter_100ms++;
+    if (clock_counter_100ms >= 10) {
+      clock_counter_100ms = 0;
+      clock_flag_100ms = 1;
+    }
 
     clock_counter_250ms++;
     if (clock_counter_250ms >= 25) {
@@ -163,8 +171,15 @@ static void clock_10ms(void) {
   temp_sensor_tick();
 
   soft_pwm_tick();
+  #ifdef HEATER_FAN
+    fan_tick();
+  #endif
   filament_tick();
   babystep_tick();
+
+  ifclock(clock_flag_100ms) {
+    temp_pid_tick();
+  }
 
   ifclock(clock_flag_250ms) {
     clock_250ms();

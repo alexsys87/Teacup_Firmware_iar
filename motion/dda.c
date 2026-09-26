@@ -240,6 +240,9 @@ void dda_create(DDA *dda, const TARGET *target) {
   uint32_t c_limit, c_limit_calc;
   #endif
   enum axis_e i;
+  #ifdef BACKLASH_COMPENSATION
+  uint32_t backlash_um = 0;
+  #endif
   #ifdef ACCELERATION_RAMPING
   // Number the moves to identify them; allowed to overflow.
   static uint8_t idcnt = 0;
@@ -289,6 +292,26 @@ void dda_create(DDA *dda, const TARGET *target) {
 
     set_direction(dda, i, delta_steps);
   }
+
+  #ifdef BACKLASH_COMPENSATION
+    /**
+      Z backlash (M425 Z F): when Z reverses, the nut first crosses the play
+      of the thread. The move gets that many extra Z steps (spread over the
+      move by the Bresenham algorithm), the position doesn't count them.
+      Homing and probing moves take up the play themselves.
+    */
+    if (dda->delta[Z]) {
+      static uint8_t z_last_dir = 2;          // 2 = unknown yet.
+      uint8_t dir = dda->z_direction;
+
+      if (z_last_dir != 2 && dir != z_last_dir && ! dda->endstop_check &&
+          settings.backlash_z && settings.backlash_f) {
+        backlash_um = settings.backlash_z * settings.backlash_f / 1000;
+        dda->delta[Z] += (uint32_t)um_to_steps((int32_t)backlash_um, Z);
+      }
+      z_last_dir = dir;
+    }
+  #endif
 
   // Handle extruder axes. They act independently from the bots kinematics
   // type, but are subject to other special handling.
@@ -384,6 +407,14 @@ void dda_create(DDA *dda, const TARGET *target) {
 
     if (distance < 1)
       distance = delta_um[E];
+
+    #ifdef BACKLASH_COMPENSATION
+      // The backlash steps count for the Z speed and acceleration limits,
+      // not for the length of the move.
+      delta_um[Z] += backlash_um;
+      if (dda->fast_axis == Z)
+        dda->fast_um = delta_um[Z];
+    #endif
 
     if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
     sersendf_P((",ds:%lu"), distance);

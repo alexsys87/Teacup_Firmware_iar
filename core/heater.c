@@ -1,11 +1,16 @@
 /** \file
   \brief Manage heaters, including PID and PWM.
 
-  Heater outputs can be operated in three ways:
+  Heater outputs can be operated in four ways:
 
    - Hardware PWM on pins with a timer channel (TIM1..4, TIM9..11), frequency
      as configured with the 'pwm' value of DEFINE_HEATER().
-   - Software PWM (sigma-delta, 10 ms tick) on pins without timer channel.
+   - Software PWM (sigma-delta, 10 ms tick) on pins without timer channel,
+     'pwm' = 1.
+   - Slow software PWM on pins without timer channel, 'pwm' = 2..10: that
+     many Hz, a fixed period with the duty in 10 ms steps, the rest carried
+     to the next period. For a bed: few switching events, an even load on
+     the power supply.
    - On/off.
 
   Tests to pass when operating the heater via M106, temp sensors disabled,
@@ -25,6 +30,7 @@
 #include "debug.h"
 #include "crc.h"
 #include "sersendf.h"
+#include "clock.h"
 
 /** \def PWM_SCALE
 
@@ -247,16 +253,155 @@ void pid_init(void) {
     heaters_pid[i].i_factor = DEFAULT_I;
     heaters_pid[i].d_factor = DEFAULT_D;
     heaters_pid[i].i_limit = DEFAULT_I_LIMIT;
+    #ifdef HEATER_BED
+      if (i == HEATER_BED) {
+        heaters_pid[i].p_factor = DEFAULT_BED_P;
+        heaters_pid[i].i_factor = DEFAULT_BED_I;
+        heaters_pid[i].d_factor = DEFAULT_BED_D;
+        heaters_pid[i].i_limit = DEFAULT_BED_I_LIMIT;
+      }
+    #endif
   }
+  pid_set_fan_ff((uint32_t)(DEFAULT_PID_FAN_FF * 100));
 }
 
-/** \brief run heater PID algorithm
+/**
+  PID state per heater, floating point (FPU). Output in PWM counts 0..255,
+  like Marlin: out = Kp * e + integral(Ki * e dt) + D + feed-forward.
+*/
+static struct {
+  float     integral;     ///< Integral term, counts.
+  float     dterm;        ///< Filtered derivative term, counts.
+  float     last_temp;    ///< Temperature of the previous run, C.
+  uint32_t  last_ms;      ///< clock_millis() of the previous run.
+  uint8_t   running;      ///< The fields above are valid.
+} pid_state[NUM_HEATERS];
+
+#ifdef HEATER_FAN
+  /// Speed of the part fan (M106 S), 0..255, for the fan feed-forward.
+  static uint8_t fan_speed;
+#endif
+
+/// Feed-forward for the part fan, counts at full fan speed * 100 (M301 F).
+static uint32_t pid_fan_ff_centi;
+
+void pid_set_fan_ff(uint32_t centi_counts) {
+  pid_fan_ff_centi = (centi_counts > 25500) ? 25500 : centi_counts;
+}
+
+uint32_t pid_get_fan_ff(void) {
+  return pid_fan_ff_centi;
+}
+
+/**
+  The PID of one heater, every 100 ms.
+
+  Floating point with the FPU. The gains come from the Teacup units of
+  the settings (M301 / M304, M130..M133): Kp = P / 256, Ki = I / 64 (per
+  second), Kd = D / 128 (seconds), Marlin units. The time step is measured.
+
+   - D acts on the measured temperature, not on the error: a new target
+     doesn't kick the output. It's low pass filtered (PID_D_FILTER seconds),
+     ADC noise would be amplified too much at 10 Hz otherwise.
+   - The integral term is limited to the I limit (M133) and doesn't grow
+     while the output is saturated (anti-windup).
+   - More than PID_FUNCTIONAL_RANGE below the target: full power, above:
+     off, the integral starts over (like Marlin). No windup while heating
+     up, no overshoot from it.
+   - Hotend: feed-forward for the part fan, M301 F counts at full fan speed,
+     proportional to M106 S (like Marlin's PID_FAN_SCALING). The heater
+     gets more power the moment the fan starts, before the temperature
+     drops.
+*/
+static uint8_t pid_run(heater_t h, float temp, float target) {
+  float kp = (float)heaters_pid[h].p_factor * (1.0f / 256.0f);
+  float ki = (float)heaters_pid[h].i_factor * (1.0f / 64.0f);
+  float kd = (float)heaters_pid[h].d_factor * (1.0f / 128.0f);
+  // I limit: qC * qs, times I factor / PID_SCALE gives counts.
+  float i_max = (float)heaters_pid[h].i_limit *
+                (float)heaters_pid[h].i_factor / (float)PID_SCALE;
+  float err = target - temp;
+  float d_filter = PID_D_FILTER;
+  float out, di;
+  uint32_t now = clock_millis();
+  float dt;
+
+  if ( ! pid_state[h].running) {
+    pid_state[h].integral = 0.0f;
+    pid_state[h].dterm = 0.0f;
+    pid_state[h].last_temp = temp;
+    pid_state[h].last_ms = now - 100;
+    pid_state[h].running = 1;
+  }
+  dt = (float)(now - pid_state[h].last_ms) * 0.001f;
+  if (dt < 0.01f)
+    dt = 0.01f;
+  if (dt > 1.0f)
+    dt = 1.0f;
+  pid_state[h].last_ms = now;
+  #ifdef HEATER_BED
+    if (h == HEATER_BED)
+      d_filter = PID_D_FILTER_BED;
+  #endif
+
+  // Derivative on measurement, filtered.
+  pid_state[h].dterm += dt / (d_filter + dt) *
+                        (-kd * (temp - pid_state[h].last_temp) / dt -
+                         pid_state[h].dterm);
+  pid_state[h].last_temp = temp;
+
+  if (err > PID_FUNCTIONAL_RANGE) {
+    pid_state[h].integral = 0.0f;
+    out = 255.0f;
+  }
+  else if (err < -PID_FUNCTIONAL_RANGE) {
+    pid_state[h].integral = 0.0f;
+    out = 0.0f;
+  }
+  else {
+    di = ki * err * dt;
+    pid_state[h].integral += di;
+    if (pid_state[h].integral > i_max)
+      pid_state[h].integral = i_max;
+    else if (pid_state[h].integral < -i_max)
+      pid_state[h].integral = -i_max;
+
+    out = kp * err + pid_state[h].integral + pid_state[h].dterm;
+    #if defined HEATER_FAN && defined HEATER_EXTRUDER
+      if (h == HEATER_EXTRUDER)
+        out += (float)pid_fan_ff_centi * 0.01f * (float)fan_speed / 255.0f;
+    #endif
+
+    // Anti-windup: take back the integration against a saturated output.
+    if (out > 255.0f) {
+      if (di > 0.0f)
+        pid_state[h].integral -= di;
+      out = 255.0f;
+    }
+    else if (out < 0.0f) {
+      if (di < 0.0f)
+        pid_state[h].integral -= di;
+      out = 0.0f;
+    }
+  }
+
+  if (DEBUG_PID && (debug_flags & DEBUG_PID))
+    sersendf_P(("PID %su: E %ld I %ld D %ld O %ld (x100)\n"), h,
+               (int32_t)(err * 100.0f), (int32_t)(pid_state[h].integral * 100.0f),
+               (int32_t)(pid_state[h].dterm * 100.0f), (int32_t)(out * 100.0f));
+
+  return (uint8_t)(out + 0.5f);
+}
+
+/** \brief run heater control, every 100 ms
   \param h which heater we're running the loop for
   \param type which temp sensor type this heater is attached to
   \param current_temp the temperature that the associated temp sensor is reporting
   \param target_temp the temperature we're trying to achieve
+  \param temp_c current_temp in C, not rounded to quarter degrees
 */
-void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t target_temp) {
+void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp,
+                 uint16_t target_temp, float temp_c) {
   uint8_t pid_output;
   uint8_t bang_bang = 0;
   uint16_t bb_hysteresis = 0;
@@ -268,6 +413,7 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t t
     return;
 
   if (target_temp == 0) {
+    pid_state[h].running = 0;
     heater_set(h, 0);
     return;
   }
@@ -291,69 +437,15 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t t
 
   if (bang_bang) {
     // Keep this heater's previous output inside the hysteresis window.
-    // (The original Teacup kept one shared value for all heaters.)
     pid_output = heaters_runtime[h].heater_output;
     if ((uint32_t)current_temp >= (uint32_t)target_temp + bb_hysteresis)
       pid_output = bb_off;
     else if ((int32_t)current_temp <= (int32_t)target_temp - bb_hysteresis)
       pid_output = bb_on;
   }
-  #ifndef BANG_BANG
   else {
-    int16_t   heater_p;
-    int16_t   heater_d;
-    int16_t   t_error = target_temp - current_temp;
-
-    heaters_runtime[h].temp_history[heaters_runtime[h].temp_history_pointer++] = current_temp;
-    heaters_runtime[h].temp_history_pointer &= (TH_COUNT - 1);
-
-    // PID stuff
-    // proportional
-    heater_p = t_error; // Units: qC where 4qC=1C
-
-    // integral
-    heaters_runtime[h].heater_i += t_error;  // Units: qC*qs where 16qC*qs=1C*s
-    // prevent integrator wind-up
-    if (heaters_runtime[h].heater_i > heaters_pid[h].i_limit)
-      heaters_runtime[h].heater_i = heaters_pid[h].i_limit;
-    else if (heaters_runtime[h].heater_i < -heaters_pid[h].i_limit)
-      heaters_runtime[h].heater_i = -heaters_pid[h].i_limit;
-
-    // derivative.  Units: qC/(TH_COUNT*qs) where 1C/s=TH_COUNT*4qC/4qs=8qC/qs)
-    // note: D follows temp rather than error so there's no large derivative when the target changes
-    heater_d = heaters_runtime[h].temp_history[heaters_runtime[h].temp_history_pointer] - current_temp;
-
-    // combine factors
-    {
-      int32_t pid_output_intermed = ( // Units: counts
-        (((int32_t) heater_p) * heaters_pid[h].p_factor) +
-        (((int32_t) heaters_runtime[h].heater_i) * heaters_pid[h].i_factor) +
-        (((int32_t) heater_d) * heaters_pid[h].d_factor)
-      ) / PID_SCALE;
-
-      // rebase and limit factors
-      if (pid_output_intermed > 255) {
-        if (t_error > 0)
-          heaters_runtime[h].heater_i -= t_error; // un-integrate
-        pid_output = 255;
-      }
-      else if (pid_output_intermed < 0) {
-        if (t_error < 0)
-          heaters_runtime[h].heater_i -= t_error; // un-integrate
-        pid_output = 0;
-      }
-      else
-        pid_output = pid_output_intermed & 0xFF;
-
-      if (DEBUG_PID && (debug_flags & DEBUG_PID))
-        sersendf_P(("T{E:%d, P:%d * %ld = %ld / I:%d * %ld = %ld / D:%d * %ld = %ld # O: %ld = %u}\n"), t_error, heater_p, heaters_pid[h].p_factor, (int32_t) heater_p * heaters_pid[h].p_factor / PID_SCALE, heaters_runtime[h].heater_i, heaters_pid[h].i_factor, (int32_t) heaters_runtime[h].heater_i * heaters_pid[h].i_factor / PID_SCALE, heater_d, heaters_pid[h].d_factor, (int32_t) heater_d * heaters_pid[h].d_factor / PID_SCALE, pid_output_intermed, pid_output);
-    }
+    pid_output = pid_run(h, temp_c, (float)target_temp * 0.25f);
   }
-  #else
-  else {
-    pid_output = 0;             // Not reached, all heaters are bang-bang.
-  }
-  #endif
 
   #ifdef HEATER_SANITY_CHECK
   // check heater sanity
@@ -414,10 +506,45 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t t
   heater_set(h, pid_output);
 }
 
+/**
+  Slow software PWM (DEFINE_HEATER() 'pwm' 2..10 Hz on a pin without timer),
+  every 10 ms. At the start of each period the on time is the output times
+  the period, in 10 ms ticks; what doesn't fit into whole ticks (sd_accu)
+  goes to the next period, so the mean duty is exact.
+*/
+static void heater_slow_pwm(heater_t index) {
+  soft_pwm_runtime_t *r = &soft_pwm_runtime[index];
+  uint8_t period = (uint8_t)(100 / heaters[index].freq);
+
+  if (r->slow_tick == 0) {
+    // max_value is 255 * 100 / percent, like for the sigma-delta.
+    int32_t duty = (int32_t)heaters_runtime[index].heater_output * 255 /
+                   heaters[index].max_value;
+    int32_t on = (duty * period + r->sd_accu) / 255;
+
+    if (on > period)
+      on = period;
+    if (on < 0)
+      on = 0;
+    r->sd_accu += (int16_t)(duty * period - on * 255);
+    if (heaters_runtime[index].heater_output == 0)
+      r->sd_accu = 0;
+    r->slow_on = (uint8_t)on;
+  }
+  do_heater(index, (r->slow_tick < r->slow_on) ? 255 : 0);
+  if (++r->slow_tick >= period)
+    r->slow_tick = 0;
+}
+
 /** \brief software PWM routine
 */
 static void heater_soft_pwm(heater_t index) {
   int16_t pwm = heaters_runtime[index].heater_output;
+
+  if (heaters[index].freq >= 2 && heaters[index].freq <= 10) {
+    heater_slow_pwm(index);
+    return;
+  }
 
   // full off? then put it just off
   if (pwm == 0) {
@@ -460,12 +587,51 @@ void heater_set(heater_t index, uint8_t value) {
     return;
 
   heaters_runtime[index].heater_output = value;
-  // Software PWM heaters are driven by soft_pwm_tick().
-  if (heaters[index].pwm_type != SOFTWARE_PWM || value == 0)
+  // Software PWM heaters are driven by soft_pwm_tick(). Slow ones finish
+  // the current period (value 0 switches them off right away).
+  if (heaters[index].pwm_type != SOFTWARE_PWM || value == 0) {
     do_heater(index, value);
+    soft_pwm_runtime[index].slow_on = 0;
+  }
   else if (value)
     power_on();
 }
+
+#ifdef HEATER_FAN
+/// Output of the part fan after the kick-start, and the kick-start ticks.
+static uint8_t fan_pwm, fan_kick;
+
+/**
+  Part fan speed, M106 S. S1..255 maps to FAN_MIN_PWM..255; starting from
+  off, the fan gets full power for FAN_KICKSTART_TIME ms first.
+*/
+void fan_set(uint8_t speed) {
+  uint8_t pwm = 0;
+
+  if (speed)
+    pwm = (uint8_t)(FAN_MIN_PWM +
+                    ((uint16_t)speed * (255 - FAN_MIN_PWM) + 127) / 255);
+  if (speed && fan_speed == 0 && FAN_KICKSTART_TIME >= 10 && pwm < 255) {
+    fan_kick = FAN_KICKSTART_TIME / 10;
+    heater_set(HEATER_FAN, 255);
+  }
+  else if ( ! fan_kick || ! speed) {
+    fan_kick = 0;
+    heater_set(HEATER_FAN, pwm);
+  }
+  fan_pwm = pwm;
+  fan_speed = speed;
+}
+
+uint8_t fan_get(void) {
+  return fan_speed;
+}
+
+void fan_tick(void) {
+  if (fan_kick && --fan_kick == 0)
+    heater_set(HEATER_FAN, fan_pwm);
+}
+#endif /* HEATER_FAN */
 
 /** \brief switch all heaters off
 */
@@ -474,8 +640,13 @@ void heater_all_off(void) {
 
   for (i = 0; i < NUM_HEATERS; i++) {
     heaters_runtime[i].heater_output = 0;
+    soft_pwm_runtime[i].slow_on = 0;
     do_heater((heater_t)i, 0);
   }
+  #ifdef HEATER_FAN
+    fan_speed = 0;
+    fan_kick = 0;
+  #endif
 }
 
 void heater_emergency_off(void) {
@@ -485,6 +656,7 @@ void heater_emergency_off(void) {
     const heater_definition_t *h = &heaters[i];
 
     heaters_runtime[i].heater_output = 0;
+    soft_pwm_runtime[i].slow_on = 0;
     if (h->pwm_type == HARDWARE_PWM) {
       TIM_TypeDef *tim = (TIM_TypeDef *)h->timer;
       uint32_t shift = ((h->channel - 1) & 1) * 8;

@@ -829,4 +829,21 @@
 #define PB_9_TIM11_COMPL    0
 #define PB9_TIM11           PB_9_TIM11
 
+/* ---- Pins without their timer (hand-written) ----
+
+  Same pin, no timer channel: DEFINE_HEATER() gives it software PWM even
+  with a 'pwm' value above 1, e.g. when the timer drives step pulses.
+
+    PB_0_GPIO    PB0 without TIM3_CH3 (TIM3 = E step pulses on P3 Steel)
+*/
+#define PB_0_GPIO_PORT      GPIOB
+#define PB_0_GPIO_PIN       0
+#define PB_0_GPIO_ID        0x10
+#define PB_0_GPIO_ADC       8
+#define PB_0_GPIO_TIMER     TIMER_NONE
+#define PB_0_GPIO_CHANNEL   0
+#define PB_0_GPIO_AF        0
+#define PB_0_GPIO_COMPL     0
+#define PB0_GPIO            PB_0_GPIO
+
 #endif /* _PINS_STM32F4_H */

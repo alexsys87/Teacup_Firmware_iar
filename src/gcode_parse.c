@@ -87,7 +87,7 @@ extern const uint32_t powers[];  // defined in sermsg.c
 ///
 /// Tested for up to 42'000 mm (accurate), 420'000 mm (precision 10 um) and
 /// 4'200'000 mm (precision 100 um).
-static int32_t decfloat_to_int(decfloat *df, uint16_t multiplicand) {
+static int32_t decfloat_to_int(decfloat *df, uint32_t multiplicand) {
 	uint32_t	r = df->mantissa;
 	uint8_t	e = df->exponent;
 
@@ -208,8 +208,13 @@ uint8_t gcode_parse_char(uint8_t c) {
             serwrite_int32(next_target.target.axis[E]);
 					break;
 				case 'F':
-					// M593 F is a frequency, it must not change the feedrate.
-					if (next_target.seen_M && next_target.M == 593) {
+					// M593 F is a frequency, M301 F the fan feed-forward, M207 /
+					// M208 F retract speeds, M425 F the backlash fraction: they
+					// must not change the feedrate.
+					if (next_target.seen_M &&
+					    (next_target.M == 593 || next_target.M == 301 ||
+					     next_target.M == 207 || next_target.M == 208 ||
+					     next_target.M == 425)) {
 						next_target.F_milli = decfloat_to_int(&read_digit, 1000);
 						break;
 					}
@@ -250,7 +255,11 @@ uint8_t gcode_parse_char(uint8_t c) {
 						next_target.R = decfloat_to_int(&read_digit, 1);
 					break;
 				case 'I':
-					next_target.I_milli = decfloat_to_int(&read_digit, 1000);
+					// M852 I is a skew factor (tangent), millionths.
+					if (next_target.seen_M && next_target.M == 852)
+						next_target.I_milli = decfloat_to_int(&read_digit, 1000000UL);
+					else
+						next_target.I_milli = decfloat_to_int(&read_digit, 1000);
 					break;
 				case 'J':
 					next_target.J_milli = decfloat_to_int(&read_digit, 1000);
@@ -308,7 +317,12 @@ uint8_t gcode_parse_char(uint8_t c) {
     // Can't do ranges in switch..case, so process actual digits here.
     // Do it early, as there are many more digits than characters expected.
     if (c >= '0' && c <= '9') {
-      if (read_digit.exponent < DECFLOAT_EXP_MAX + 1 &&
+      // M852 skew factors and M900 K take more decimals than lengths.
+      uint8_t exp_max = (next_target.seen_M &&
+                         (next_target.M == 852 || next_target.M == 900)) ?
+                        6 : DECFLOAT_EXP_MAX;
+
+      if (read_digit.exponent < exp_max + 1 &&
           ((next_target.option_inches == 0 &&
           read_digit.mantissa < DECFLOAT_MANT_MM_MAX) ||
           (next_target.option_inches &&

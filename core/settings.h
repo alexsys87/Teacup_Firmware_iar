@@ -22,6 +22,9 @@ typedef struct {
   uint32_t      is_damp[2];     ///< M593 D, damping ratio, 1/1000.
   uint32_t      is_type[2];     ///< M593 T, 0 = ZV, 1 = MZV.
   uint32_t      s_curve_us;     ///< M593 S, S-curve smoothing of X/Y, us.
+  int32_t       skew_xy;        ///< M852 I, XY skew factor, millionths.
+  uint32_t      backlash_z;     ///< M425 Z, Z backlash, um.
+  uint32_t      backlash_f;     ///< M425 F, fraction corrected, 1/1000.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.
