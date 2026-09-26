@@ -31,6 +31,13 @@ enum axis_endstop_e {
   Z_MAX_ENDSTOP = 0x20,
 };
 
+/**
+  Z_HOMING_HEIGHT: lift Z to this height (mm) before homing X or Y, so
+  the nozzle or a BLTouch pin doesn't drag over the bed or clips. Never
+  lowers Z.
+*/
+void home_lift_z(void);
+
 void home_none(void);
 void home_x_negative(void);
 void home_x_positive(void);

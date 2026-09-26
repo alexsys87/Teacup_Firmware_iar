@@ -103,7 +103,8 @@ mark('m_pos'); send('M114\n'); run('0.05')
 mark('m_limit'); send('G1 X300 F9000\n'); run('2.0')
 mark('m_limit_pos'); send('M114\n'); run('0.05')
 pin('B', 10, False)
-mark('m_home'); send('G28 X\n'); run('0.5')
+# Z goes up from 1 to 5 mm first (Z_HOMING_HEIGHT), about 1.2 s.
+mark('m_home'); send('G28 X\n'); run('2.0')
 pin('B', 10, True); run('1.0')
 mark('m_home_pos'); send('M114\n'); run('0.05')
 # Y/Z endstops on PB3/PB15 (final pin plan).

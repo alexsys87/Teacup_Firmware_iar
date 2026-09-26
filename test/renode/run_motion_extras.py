@@ -15,9 +15,12 @@ Checks:
     same direction none, M114 Z unaffected; M425 F0.5 half of it
   - G10 / G11 (M207 S F Z, M208 S F): E retract and prime, Z lift kept
     for travel moves, G-code coordinates unchanged, repeated G10 ignored
+  - G28 X / G28 Y lift Z to Z_HOMING_HEIGHT first, only once
   - M86 S3: no line for 3 s while printing (armed by a move with E) ->
     retract, Z up, park, hotend off; a long G4 doesn't count
   - M500, M502, M501 store and load M852, M425 and M207 / M208
+  - hotend fan (PCF8574 P6) on at 50 C, controller fan (P7) while the
+    drivers are enabled and 60 s afterwards (models/TeacupPCF8574.cs)
 """
 import math, os, re, subprocess, sys
 
@@ -64,10 +67,13 @@ def adc(hotend, bed):
         cmd('sysbus WriteWord 0x%08X %d' % (ADCBUF + 2 * (i * SLOTS + 0), hotend))
         cmd('sysbus WriteWord 0x%08X %d' % (ADCBUF + 2 * (i * SLOTS + 1), bed))
 
-for _m in ('TeacupSTM32DMA.cs', 'TeacupSTM32_UART.cs', 'TeacupSTM32_OTGFS.cs'):
+for _m in ('TeacupSTM32DMA.cs', 'TeacupSTM32_UART.cs', 'TeacupSTM32_OTGFS.cs', 'TeacupPCF8574.cs'):
     cmd('include @%s' % os.path.join(HERE, 'models', _m))
 cmd('mach create "p3"')
 cmd('machine LoadPlatformDescription @%s' % os.path.abspath(REPL))
+# PCF8574 at 0x20: hotend fan P6, controller fan P7 (board file).
+cmd('machine LoadPlatformDescriptionFromString "pcf: I2C.TeacupPCF8574 @ i2c1 0x20"')
+def pcf(tag): cmd('echo "@@PCF %s"' % tag); cmd('sysbus.i2c1.pcf Output')
 cmd('sysbus LoadELF @%s' % os.path.abspath(ELF))
 cmd('sysbus.gpioPortA OnGPIO 0 true')    # filament present
 cmd('showAnalyzer sysbus.usart2 Antmicro.Renode.Analyzers.LoggingUartAnalyzer')
@@ -83,13 +89,14 @@ run('0.4')
 cmd('sysbus LogPeripheralAccess sysbus.gpioPortB true')
 for _t in ('timer1', 'timer2', 'timer3'):
     cmd('sysbus LogPeripheralAccess sysbus.%s true' % _t)
+pcf('boot')
 send('M80\n'); run('0.7')                # supply on, no wait on the first move
 
 # ---- M852 skew ----
 send('G92 X0 Y0 Z0 E0\n'); run('0.05')
 mark('sk_set'); send('M852 I0.01\nM852\n'); run('0.1')
 mark('sk_y10'); send('G1 Y10 F3000\n'); run('0.6')
-mark('sk_pos'); send('M114\n'); run('0.05')
+mark('sk_pos'); send('M114\n'); run('0.05'); pcf('moving')
 mark('sk_x10'); send('G1 X10\n'); run('0.6')
 mark('sk_y0'); send('G1 Y0\n'); run('0.6')
 mark('sk_pos0'); send('M114\n'); run('0.05')
@@ -126,10 +133,13 @@ mark('rt_report'); send('M208\n'); run('0.1')
 HOT = c_to_adc(200.0)
 adc(HOT, ROOM); run('0.3')
 send('M104 S200\n'); run('0.3')
+# The first G28 lifts Z from 1 to 5 mm first (Z_HOMING_HEIGHT, ~1.2 s).
+mark('hl_home')
 for port, n, ax in (('B', 10, 'X'), ('B', 3, 'Y')):
     pin(port, n, False)
-    send('G28 %s\n' % ax); run('0.5')
+    send('G28 %s\n' % ax); run('2.0')
     pin(port, n, True); run('1.0')
+mark('hl_homed'); send('M114\n'); run('0.05')
 # Fewer Z steps for the 10 mm lift (faster simulation).
 mark('hl_set'); send('M92 Z400\nM86 S3 E0\nM86\n'); run('0.2')
 mark('hl_g4'); send('G1 X20 Y20 E0.5 F3000\nG4 P5000\n'); run('6.0')
@@ -141,6 +151,11 @@ mark('hl_pos'); send('M114\nM105\n'); run('0.1')
 mark('st_save'); send('M852 I-0.0025\nM500\n'); run('2.5')
 mark('st_def'); send('M502\nM503\n'); run('0.2')
 mark('st_load'); send('M501\nM503\n'); run('0.2')
+# ---- hotend fan (P6, >= 50 C), controller fan (P7) ----
+send('M104 S60\n'); adc(c_to_adc(60.0), ROOM); run('0.6'); pcf('hot60')
+send('M104 S0\n'); adc(c_to_adc(45.0), ROOM); run('0.6'); pcf('cool45')
+send('M84\n'); run('2.0'); pcf('idle2')
+run('60.0'); pcf('idle62')
 mark('end')
 cmd('quit')
 
@@ -217,6 +232,8 @@ check('M208 S0.1: 0.1 mm more primed', abs(pulses('rt_extra', 'E') - (2508 + 250
 check('  absolute E continues (E1 = 1672 steps)', pulses('rt_print', 'E') == 1672 and pos('rt_pos3') == (10.0, 0.0, 1.0, 1.0),
       (pulses('rt_print', 'E'), pos('rt_pos3')))
 check('  M208 reported', line('rt_report', 'M208') == 'M208 S0.10 F1200.00', uart('rt_report'))
+check('G28 X: Z lifted to 5 mm first (Z_HOMING_HEIGHT), once', pulses('hl_home', 'Z') == 32000
+      and pos('hl_homed') is not None and pos('hl_homed')[:3] == (0.0, 0.0, 5.0), (pulses('hl_home', 'Z'), pos('hl_homed')))
 check('M86 reported', line('hl_set', 'M86') == 'M86 S3 E0', uart('hl_set'))
 check('host lost: not during G4 P5000 nor 1.5 s after', not any('Host lost' in l for l in uart('hl_g4') + uart('hl_wait')),
       uart('hl_g4') + uart('hl_wait'))
@@ -226,7 +243,7 @@ check('host lost after 3 s without lines', 'echo:No line from the host for 3 s' 
 check('  retract 2 mm, Z up 10 mm', pulses('hl_lost', 'E') == 3344 and pulses('hl_lost', 'Z') == 4000,
       (pulses('hl_lost', 'E'), pulses('hl_lost', 'Z')))
 p = pos('hl_pos')
-check('  parked at X10 Y170, Z + 10', p is not None and p[:3] == (10.0, 170.0, 11.0), p)
+check('  parked at X10 Y170, Z + 10', p is not None and p[:3] == (10.0, 170.0, 15.0), p)
 check('  hotend target 0', any(re.match(r'ok T:[\d.]+/0\.0 ', l) for l in uart('hl_pos')), uart('hl_pos'))
 check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('st_save')), uart('st_save'))
 check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_def', 'M425') == 'M425 F1.00 Z0.00',
@@ -234,6 +251,16 @@ check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_
 check('M501: loaded', line('st_load', 'M852') == 'M852 I-0.002500' and line('st_load', 'M425') == 'M425 F0.50 Z0.00'
       and line('st_load', 'M207') == 'M207 S1.50 F1500.00 Z0.20',
       (line('st_load', 'M852'), line('st_load', 'M425')))
+PCF = {}
+for m in re.finditer(r'@@PCF (\w+)\s*\n(?:.*\n)*?\s*(0x[0-9A-Fa-f]+|\d+)\s*\n', out):
+    PCF[m.group(1)] = int(m.group(2), 0)
+fan = lambda t, bit: (PCF.get(t, -1) >> bit) & 1 if t in PCF else None
+check('PCF8574: both fans off at boot, P0..P5 high', PCF.get('boot') == 0x3F, PCF)
+check('controller fan on while moving', fan('moving', 7) == 1, PCF.get('moving'))
+check('hotend fan on at 60 C', fan('hot60', 6) == 1, PCF.get('hot60'))
+check('hotend fan off at 45 C', fan('cool45', 6) == 0, PCF.get('cool45'))
+check('controller fan: on 2 s after M84, off after 60 s', fan('idle2', 7) == 1 and fan('idle62', 7) == 0,
+      (PCF.get('idle2'), PCF.get('idle62')))
 check('no error / reset', 'Error:' not in out and out.count('] start') == 1, out.count('] start'))
 print('\n%d failure(s)' % fails)
 sys.exit(1 if fails else 0)

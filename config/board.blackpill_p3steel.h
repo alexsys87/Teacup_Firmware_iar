@@ -30,7 +30,8 @@
                                    PC15  spare (*, SD detect / Z2_STEP, G34)
 
     (*) stand-alone printing, optional. Encoder, buttons and beeper go to a
-        PCF8574 I/O expander on the I2C bus, no pins needed.
+        PCF8574 I/O expander on the I2C bus, no pins needed; its P6 / P7
+        switch the hotend fan and the controller fan.
 
   Changes to the wiring against the first version of this file:
    - Z2 driver: STEP and DIR in parallel to the Z driver (PB12 / PB13).
@@ -212,8 +213,8 @@
     spare                 PC_15  SD detect, or Z2_STEP (Z_STEPPER_ALIGN
                                  above, same crystal removal)
     display               I2C1   PB6/PB7 (SSD1306 or HD44780 + PCF8574)
-    encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27
-    beeper
+    encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27,
+    beeper                       P0..P5 (P6 / P7: fans, see PCF8574_ADDRESS)
 
   PC13..PC15: low speed (2 MHz), 3 mA, never a current source. Fine for a
   servo signal, a chip select and inputs.
@@ -221,6 +222,22 @@
   No DEBUG_LED_PIN / BEEPER_PIN: PC13 is the servo, the beeper goes to the
   expander.
 */
+
+/** \def PCF8574_ADDRESS HOTEND_FAN_EXPANDER_BIT CONTROLLER_FAN_EXPANDER_BIT
+  All MCU pins are taken: the hotend fan (on above HOTEND_FAN_TEMP) and
+  the controller fan (on while the drivers are enabled or a heater is on)
+  go to a PCF8574 I/O expander on I2C1 (PB6/PB7), 7 bit address
+  PCF8574_ADDRESS (0x20: A0..A2 to GND), outputs P6 and P7. A PCF8574
+  output is only a weak pull-up when high: each fan through a MOSFET
+  module with a 10 k pull-up to 5 V at its input ("high = on"). P0..P5
+  stay free (inputs) for encoder, buttons and beeper. Without an expander
+  nothing happens (the writes aren't acknowledged), fans on 12 V directly
+  run all the time as before. An MCU pin instead: HOTEND_FAN_PIN /
+  CONTROLLER_FAN_PIN (active high, *_FAN_INVERT for active low).
+*/
+#define PCF8574_ADDRESS          0x20
+#define HOTEND_FAN_EXPANDER_BIT  6
+#define CONTROLLER_FAN_EXPANDER_BIT 7
 
 /** \def SPI_FLASH
   SPI flash chip (W25Q16..W25Q128) soldered to the footprint on the bottom

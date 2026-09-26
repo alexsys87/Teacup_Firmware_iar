@@ -84,6 +84,41 @@ static uint8_t wait_flag(volatile uint32_t *reg, uint32_t mask,
   return 0;
 }
 
+/// RTC backup register 0 value asking for the bootloader.
+#define BOOTLOADER_MAGIC  0xDF00B007UL
+/// STM32F401/F411 system memory: bootloader vector table.
+#define SYSMEM_BASE       0x1FFF0000UL
+
+void cpu_reboot_to_bootloader(void) {
+  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+  (void)RCC->APB1ENR;
+  PWR->CR |= PWR_CR_DBP;                  // Backup domain writable.
+  RTC->BKP0R = BOOTLOADER_MAGIC;
+  NVIC_SystemReset();
+  for (;;)
+    ;
+}
+
+void cpu_check_bootloader(void) {
+  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+  (void)RCC->APB1ENR;
+  if (RTC->BKP0R != BOOTLOADER_MAGIC)
+    return;
+  PWR->CR |= PWR_CR_DBP;
+  RTC->BKP0R = 0;                         // Next reset starts the firmware.
+
+  // Reset state otherwise (HSI clock, no peripherals, no interrupts
+  // enabled): system memory at address 0, its stack and reset vector.
+  RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+  (void)RCC->APB2ENR;
+  SYSCFG->MEMRMP = SYSCFG_MEMRMP_MEM_MODE_0;
+  SCB->VTOR = SYSMEM_BASE;
+  __set_MSP(*(volatile uint32_t *)SYSMEM_BASE);
+  __enable_irq();
+  // Read the reset vector after switching the stack, no local variables.
+  ((void (*)(void))(*(volatile uint32_t *)(SYSMEM_BASE + 4)))();
+}
+
 void cpu_init(void) {
   volatile uint32_t dummy;
 

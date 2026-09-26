@@ -42,6 +42,7 @@
 #include "retract.h"
 #include "host_watch.h"
 #include "power_loss.h"
+#include "print_stats.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -452,6 +453,23 @@ void process_gcode_command(void) {
 					retract_reset();
 				#endif
 
+				#ifdef Z_PROBE
+					/**
+					  Safe Z homing: the probe needs X and Y at the homing
+					  point. G28 Z with X or Y not homed homes them first.
+					*/
+					if (next_target.seen_Z) {
+						if ( ! (axes_homed & HOMED_X))
+							next_target.seen_X = 1;
+						if ( ! (axes_homed & HOMED_Y))
+							next_target.seen_Y = 1;
+					}
+				#endif
+				// Lift Z before X / Y (Z_HOMING_HEIGHT), once per G28.
+				if (next_target.seen_X || next_target.seen_Y ||
+				    ! next_target.seen_Z)
+					home_lift_z();
+
 				if (next_target.seen_X) {
 					#if defined	X_MIN_PIN
 						home_x_negative();
@@ -822,6 +840,7 @@ void process_gcode_command(void) {
         //? This makes the SD card available as a G-code source. File is the
         //? one selected with M23.
         gcode_sources |= GCODE_SOURCE_SD;
+        job_start();
         break;
 
       case 25:
@@ -831,6 +850,7 @@ void process_gcode_command(void) {
         //? sources. The file is kept open. The position inside the file
         //? is kept as well, to allow resuming.
         gcode_sources &= (uint8_t)~GCODE_SOURCE_SD;
+        job_pause();
         break;
       #endif /* SD */
 
@@ -905,6 +925,11 @@ void process_gcode_command(void) {
             next_target.P = 0;
           #endif
 				temp_set((temp_sensor_t)next_target.P, next_target.S);
+				#ifdef HEATER_EXTRUDER
+					// Hotend off (end G-code): the print is over.
+					if (next_target.P == TEMP_SENSOR_extruder && next_target.S == 0)
+						job_stop_idle();
+				#endif
 				break;
 
 			case 109:
@@ -921,6 +946,13 @@ void process_gcode_command(void) {
 					if ( ! next_target.seen_P)
 						next_target.P = TEMP_SENSOR_extruder;
 					if (next_target.seen_S || next_target.seen_R) {
+						uint16_t t = next_target.seen_S ? next_target.S : next_target.R;
+
+						// Heating up and waiting: a print starts (M75 implied).
+						if (t)
+							job_start();
+						else if (next_target.P == TEMP_SENSOR_extruder)
+							job_stop_idle();
 						temp_set((temp_sensor_t)next_target.P,
 						         next_target.seen_S ? next_target.S : next_target.R);
 						temp_wait_sensor((temp_sensor_t)next_target.P,
@@ -937,6 +969,8 @@ void process_gcode_command(void) {
 				//?
 				#ifdef HEATER_BED
 					if (next_target.seen_S || next_target.seen_R) {
+						if (next_target.seen_S ? next_target.S : next_target.R)
+							job_start();
 						temp_set(TEMP_SENSOR_bed,
 						         next_target.seen_S ? next_target.S : next_target.R);
 						temp_wait_sensor(TEMP_SENSOR_bed, next_target.seen_S ? 1 : 0);
@@ -1554,6 +1588,71 @@ void process_gcode_command(void) {
         break;
       #endif
 
+      case 31:
+        //? --- M31: Report the print time ---
+        //?
+        //? Example: M31
+        //?
+        //? "echo:Print time: 1h 2m 3s" of the current or the last print.
+        //?
+        job_report_time();
+        break;
+
+      case 75:
+        //? --- M75: Start the print job timer ---
+        //?
+        //? Also after M76: continues. M109 / M190 with a target and M24
+        //? start it, too.
+        //?
+        job_start();
+        break;
+
+      case 76:
+        //? --- M76: Pause the print job timer ---
+        //?
+        job_pause();
+        break;
+
+      case 77:
+        //? --- M77: Stop the print job timer ---
+        //?
+        //? The print counts as finished (M78). The end of an SD / flash file
+        //? and M104 S0 stop it, too, when the moves are done.
+        //?
+        job_stop_idle();
+        break;
+
+      case 78:
+        //? --- M78: Print statistics ---
+        //?
+        //? Example: M78
+        //? Example: M78 S78  reset them
+        //?
+        //? Prints started, finished, failed; total and longest print time;
+        //? filament used. Stored automatically (not with M500).
+        //?
+        if (next_target.seen_S && next_target.S == 78)
+          job_reset_stats();
+        job_report_stats();
+        break;
+
+      case 997:
+        //? --- M997: Firmware update: reboot into the DFU bootloader ---
+        //?
+        //? Example: M997
+        //?
+        //? The STM32 system bootloader (USB DFU) starts, like with BOOT0
+        //? pressed: flash the new firmware with dfu-util or STM32CubeProgrammer,
+        //? e.g. "dfu-util -a 0 -s 0x08000000:leave -D teacup.bin". The
+        //? heaters are switched off. Waits for the moves to finish.
+        //?
+        queue_wait();
+        heater_all_off();
+        serial_writestr("echo:Rebooting into the DFU bootloader\n");
+        serial_flush();
+        cpu_reboot_to_bootloader();
+        break;
+
       #ifdef POWER_LOSS_RECOVERY
       case 413:
         //? --- M413: Power loss recovery on / off ---
@@ -2057,7 +2156,8 @@ void process_gcode_command(void) {
         //? Duration of the step interrupt in CPU cycles (min/avg/max), max.
         //? latency from compare match to handler entry, share of CPU time
         //? since the last reset, number of steps scheduled too late. Use it
-        //? to measure optimisations on the real hardware.
+        //? to measure optimisations on the real hardware. The second line
+        //? tells the multi-stepping setting.
         //?
         if (next_target.seen_R) {
           step_stats_reset();
@@ -2084,6 +2184,17 @@ void process_gcode_command(void) {
                      n, n ? smin : 0, avg, smax, slat, slate, spulses,
                      load / 100, (uint8_t)(load % 100),
                      (uint32_t)F_CPU);
+          #ifdef MULTISTEPPING
+            sersendf_P(("echo:Multi-stepping: below %lu cycles (%lu Hz), up to %su steps\n"),
+                       (uint32_t)MULTISTEP_MIN_CYCLES,
+                       (uint32_t)(F_CPU / MULTISTEP_MIN_CYCLES),
+                       (uint8_t)MULTISTEP_MAX);
+          #else
+            // An extra step per interrupt waits pulse + low time: worth it
+            // only when the interrupt takes longer (README, Multi-stepping).
+            sersendf_P(("echo:Multi-stepping: off (pays off above avg %lu cycles)\n"),
+                       (uint32_t)(2 * STEP_PULSE_CYCLES));
+          #endif
         }
         break;
 

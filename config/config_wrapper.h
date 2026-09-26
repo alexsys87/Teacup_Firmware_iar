@@ -138,7 +138,7 @@
 /**
   Check wether we need I2C.
 */
-#ifdef DISPLAY_BUS_I2C
+#if defined DISPLAY_BUS_I2C || defined PCF8574_ADDRESS
   #define I2C
 #endif
 
@@ -507,6 +507,23 @@
     #define BLTOUCH_DELAY        500
   #endif
 #endif
+/**
+  Multi-stepping: with ACCELERATION_RAMPING only. MULTISTEP_MIN_CYCLES:
+  below this step interval (CPU cycles) 2, then 4, up to MULTISTEP_MAX
+  steps per interrupt.
+*/
+#ifdef MULTISTEPPING
+  #ifndef ACCELERATION_RAMPING
+    #undef MULTISTEPPING
+  #endif
+  #ifndef MULTISTEP_MIN_CYCLES
+    #define MULTISTEP_MIN_CYCLES 840      // 100 kHz at 84 MHz.
+  #endif
+  #ifndef MULTISTEP_MAX
+    #define MULTISTEP_MAX        8
+  #endif
+#endif
+
 /**
   Power loss recovery: records in the SPI flash, for SD / flash prints.
 */

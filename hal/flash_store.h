@@ -8,7 +8,15 @@
 #include <stdint.h>
 
 /**
-  Read the newest valid record.
+  Record version of the print statistics (M78). They share the sector
+  with the settings: reading the settings takes the newest record of
+  another version, the statistics the newest of this one; erasing the
+  full sector keeps the newest record of the other kind.
+*/
+#define FLASH_STORE_STATS 0x5354
+
+/**
+  Read the newest valid record (of the statistics, or of the settings).
   \return 1 if a record with this version and length was found and copied.
 */
 uint8_t flash_store_read(void *data, uint16_t length, uint16_t version);

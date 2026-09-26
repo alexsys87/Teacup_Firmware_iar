@@ -191,7 +191,8 @@ def check(name, cond, info=''):
 def near(a, b, tol):
     return a is not None and b is not None and abs(a - b) <= tol
 
-Z0 = 8.0                                 # physical Z of G92 Z0
+Z0 = 13.0                                # physical Z of G92 Z0 (8 + 5 mm
+                                         # lift of G28, Z_HOMING_HEIGHT)
 m0, m1 = MODEL.get('cut', {}), MODEL.get('end', {})
 # Boot messages come before the section tag (sent after the reset).
 u = uart('print') + uart('restart')

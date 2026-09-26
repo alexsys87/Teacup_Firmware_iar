@@ -3,8 +3,10 @@
 
   Sequence per transmission (RM0368 master transmitter):
     START -> SB -> address -> ADDR -> data ... -> last data -> BTF -> STOP.
-  The queue stores 9 bit entries: bit 8 marks the last byte of a
-  transmission.
+  The queue stores 10 bit entries: bit 8 marks the last byte of a
+  transmission, bit 9 an address entry, which starts each transmission.
+  So devices with different addresses (display, I/O expander) can share
+  the bus and the queue.
 */
 
 #include "i2c.h"
@@ -75,7 +77,9 @@ enum {
 static volatile uint16_t i2c_buf[I2C_BUFSIZE];
 static volatile uint16_t i2c_head, i2c_tail;
 static volatile uint8_t i2c_state;
-static uint8_t i2c_address;
+static uint8_t i2c_address;         ///< Default address (i2c_write()).
+static uint8_t i2c_inited;
+static uint8_t w_open;              ///< Writer: transmission started, not ended.
 
 #define I2C_IRQS  (I2C_CR2_ITEVTEN | I2C_CR2_ITBUFEN | I2C_CR2_ITERREN)
 
@@ -113,7 +117,11 @@ static void i2c_start(void) {
 }
 
 void i2c_init(uint8_t address) {
-  i2c_address = address;
+  if (address)
+    i2c_address = address;
+  if (i2c_inited)
+    return;                     // Display and expander both init the bus.
+  i2c_inited = 1;
   i2c_head = 0;
   i2c_tail = 0;
   i2c_state = I2C_IDLE;
@@ -153,8 +161,13 @@ uint8_t i2c_busy(void) {
   return i2c_state != I2C_IDLE;
 }
 
-void i2c_write(uint8_t data, uint8_t last_byte) {
-  uint16_t head = i2c_head;       // Written by this function only.
+uint8_t i2c_tx_open(void) {
+  return w_open;
+}
+
+/// Put an entry into the queue, wait for room.
+static void i2c_push(uint16_t entry) {
+  uint16_t head = i2c_head;       // Written by the writer only.
   uint16_t next = (head + 1) & (I2C_BUFSIZE - 1);
   uint16_t tail;
 
@@ -163,8 +176,22 @@ void i2c_write(uint8_t data, uint8_t last_byte) {
     tail = i2c_tail;
   } while (next == tail);
 
-  i2c_buf[head] = data | (last_byte ? 0x100 : 0);
+  i2c_buf[head] = entry;
   i2c_head = next;
+}
+
+void i2c_write(uint8_t data, uint8_t last_byte) {
+  i2c_write_to(i2c_address, data, last_byte);
+}
+
+void i2c_write_to(uint8_t address, uint8_t data, uint8_t last_byte) {
+  if ( ! w_open) {
+    i2c_push(0x200 | address);
+    w_open = 1;
+  }
+  i2c_push(data | (last_byte ? 0x100 : 0));
+  if (last_byte)
+    w_open = 0;
 
   ATOMIC_START_NOSTEP();
     uint8_t state = i2c_state;
@@ -183,7 +210,10 @@ void I2C_EV_HANDLER(void) {
   uint32_t sr1 = I2Cx->SR1;
 
   if (sr1 & I2C_SR1_SB) {                       // EV5: START sent.
-    I2Cx->DR = i2c_address;
+    uint16_t a = i2c_queue_empty() ? 0 : i2c_queue_pop();
+
+    // Every transmission starts with its address entry.
+    I2Cx->DR = (a & 0x200) ? (uint8_t)a : i2c_address;
     return;
   }
 
