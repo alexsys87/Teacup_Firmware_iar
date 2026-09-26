@@ -36,6 +36,13 @@ uint8_t probe_home_z(void);
 */
 uint8_t probe_single(int32_t px, int32_t py, int32_t *bed_z);
 
+/**
+  G34: align Z and Z2 (Z_STEPPER_ALIGN): probe at Z_STEPPER_ALIGN_X1 / X2,
+  raise the lower lead screw alone, repeat until the difference is at most
+  'accuracy' um, then home Z again. \return 1 when aligned.
+*/
+uint8_t probe_align_z(uint8_t iterations, int32_t accuracy);
+
 /// G29: probe the mesh (needs BED_LEVELING), leveling on afterwards.
 uint8_t probe_mesh(void);
 

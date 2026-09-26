@@ -28,6 +28,8 @@
 #include "settings.h"
 #include "filament.h"
 #include "probe.h"
+#include "host_watch.h"
+#include "power_loss.h"
 
 #ifdef CANNED_CYCLE
   static const char canned_gcode_P[] = CANNED_CYCLE;
@@ -118,6 +120,11 @@ static void init(void) {
     probe_init();
   #endif
 
+  // An interrupted SD / flash print? Tell the host (M1000 resumes).
+  #ifdef POWER_LOSS_RECOVERY
+    plr_init();
+  #endif
+
   // Report unusual reset causes. Power-on sets POR and BOR together.
   if (cpu_reset_flags & RCC_CSR_IWDGRSTF)
     serial_writestr("echo:Watchdog Reset\n");
@@ -155,6 +162,14 @@ int main(void) {
   for (;;) {
     // Filament ran out: pause (filament change) between two commands.
     filament_runout_service();
+    #ifdef HOST_WATCH
+      // Host gone while printing: park.
+      host_watch_poll();
+    #endif
+    #ifdef POWER_LOSS_RECOVERY
+      // File print: store the state at layer changes.
+      plr_tick();
+    #endif
 
     // If the movement queue is full, a move command would block. Wait.
     if (queue_full() == 0) {
@@ -164,11 +179,17 @@ int main(void) {
         #ifdef SD
           if (gcode_sources & GCODE_SOURCE_SD) {
             gcode_active = GCODE_SOURCE_SD;
+            #ifdef POWER_LOSS_RECOVERY
+              plr_line_begin();
+            #endif
             if (sd_read_gcode_line()) {
               serial_writestr("\nSD file done.\n");
               gcode_sources &= (uint8_t)~GCODE_SOURCE_SD;
               // There is no pf_close(), subsequent reads will stick at EOF
               // and return zeros.
+              #ifdef POWER_LOSS_RECOVERY
+                plr_file_done();
+              #endif
             }
             gcode_active = GCODE_SOURCE_INIT;
           }

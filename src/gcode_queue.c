@@ -44,6 +44,7 @@
 #include "gcode_parse.h"
 #include "dda_queue.h"
 #include "sd.h"
+#include "host_watch.h"
 
 #ifndef CMD_BUFSIZE
   /// Number of queued lines.
@@ -273,6 +274,10 @@ uint8_t gcode_queue_free(void) {
   return CMD_BUFSIZE - cmd_count;
 }
 
+uint8_t gcode_queue_idle(void) {
+  return cmd_count == 0 && ! executing && ! paused;
+}
+
 uint8_t gcode_queue_execute(void) {
   const char *s;
   int32_t n;
@@ -291,6 +296,9 @@ uint8_t gcode_queue_execute(void) {
   keepalive_count = 0;
   gcode_ok_sent = 0;
   gcode_active = GCODE_SOURCE_SERIAL;
+  #ifdef HOST_WATCH
+    host_watch_line(cmd_port[cmd_tail]);
+  #endif
 
   #ifdef SD_FLASH
     // Upload (M28): store lines instead of executing them, up to M29.
@@ -309,6 +317,10 @@ uint8_t gcode_queue_execute(void) {
 
   gcode_active = GCODE_SOURCE_INIT;
   executing = 0;
+  #ifdef HOST_WATCH
+    // A long command (M109, G4) doesn't count as waiting for the host.
+    host_watch_line(cmd_port[cmd_tail]);
+  #endif
 
   // Free the slot only now: gcode_queue_read_serial() may run while the
   // command executes (from clock_poll()) and must not overwrite it.

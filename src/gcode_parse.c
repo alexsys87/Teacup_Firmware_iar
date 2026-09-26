@@ -237,6 +237,9 @@ uint8_t gcode_parse_char(uint8_t c) {
 					// if this is heater PID stuff, multiply by PID_SCALE because we divide by PID_SCALE later on
 					else if ((next_target.M >= 130) && (next_target.M <= 132))
 						next_target.S = decfloat_to_int(&read_digit, PID_SCALE);
+					// Retract lengths, um.
+					else if ((next_target.M == 207) || (next_target.M == 208))
+						next_target.S = decfloat_to_int(&read_digit, 1000);
 					else
 						next_target.S = decfloat_to_int(&read_digit, 1);
 					if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
@@ -288,7 +291,11 @@ uint8_t gcode_parse_char(uint8_t c) {
 					break;
 				case 'T':
 					next_target.T = read_digit.mantissa;
-					next_target.T_value = decfloat_to_int(&read_digit, 1);
+					// G34 T is an accuracy in mm, um here.
+					if (next_target.seen_G && next_target.G == 34)
+						next_target.T_value = decfloat_to_int(&read_digit, 1000);
+					else
+						next_target.T_value = decfloat_to_int(&read_digit, 1);
 					if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
 						serwrite_uint8(next_target.T);
 					break;

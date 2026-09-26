@@ -3,6 +3,7 @@
 */
 
 #include "dda_queue.h"
+#include "gcode_parse.h"
 
 #include <string.h>
 
@@ -123,6 +124,12 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 
   new_movebuffer->endstop_check = endstop_check;
   new_movebuffer->endstop_stop_cond = endstop_stop_cond;
+  #ifdef POWER_LOSS_RECOVERY
+    if (gcode_active & GCODE_SOURCE_SD)
+      new_movebuffer->plr = plr_line;
+    else
+      new_movebuffer->plr.file_pos = 0xFFFFFFFFUL;
+  #endif
   dda_create(new_movebuffer, t);
 
   /**

@@ -255,19 +255,24 @@ TEACUP_INLINE void step_pulse_wait(uint32_t start) {
   #else
     #define _z_dir1(dir)        WRITE(Z_DIR_PIN, (dir) ^ 1)
   #endif
-  #if defined Z2_STEP_PIN && defined Z2_DIR_PIN
+  #if defined Z2_STEP_PIN
     /*
       Second Z motor on its own driver (Marlin: Z_DUAL_STEPPER_DRIVERS),
-      stepped together with the first one.
+      stepped together with the first one. Without Z2_DIR_PIN both drivers
+      share Z_DIR_PIN, only the STEP is separate (for G34).
     */
     #define _z_step(st)         do { WRITE(Z_STEP_PIN, st); \
                                      WRITE(Z2_STEP_PIN, st); } while (0)
-    #ifndef Z2_INVERT_DIR
-      #define _z_dir2(dir)      WRITE(Z2_DIR_PIN, dir)
+    #if defined Z2_DIR_PIN
+      #ifndef Z2_INVERT_DIR
+        #define _z_dir2(dir)    WRITE(Z2_DIR_PIN, dir)
+      #else
+        #define _z_dir2(dir)    WRITE(Z2_DIR_PIN, (dir) ^ 1)
+      #endif
+      #define z_direction(dir)  do { _z_dir1(dir); _z_dir2(dir); } while (0)
     #else
-      #define _z_dir2(dir)      WRITE(Z2_DIR_PIN, (dir) ^ 1)
+      #define z_direction(dir)  _z_dir1(dir)
     #endif
-    #define z_direction(dir)    do { _z_dir1(dir); _z_dir2(dir); } while (0)
   #else
     #define _z_step(st)         WRITE(Z_STEP_PIN, st)
     #define z_direction(dir)    _z_dir1(dir)
@@ -330,7 +335,7 @@ TEACUP_INLINE void step_pulse_wait(uint32_t start) {
 #else
   #define STEP_Z_BIT(idx) 0UL
 #endif
-#if defined Z2_STEP_PIN && defined Z2_DIR_PIN && defined Z_STEP_PIN
+#if defined Z2_STEP_PIN && defined Z_STEP_PIN
   #define STEP_Z2_BIT(idx) STEP_BIT(Z2_STEP_PIN, idx)
 #else
   #define STEP_Z2_BIT(idx) 0UL
@@ -360,7 +365,19 @@ typedef struct {
   do { (s)->a = (s)->b = (s)->c = (s)->d = (s)->e = (s)->h = 0; } while (0)
 #define step_add_x(s)   STEP_ADD_BITS(s, STEP_X_BIT)
 #define step_add_y(s)   STEP_ADD_BITS(s, STEP_Y_BIT)
-#define step_add_z(s)   STEP_ADD_BITS(s, STEP_ZZ2_BIT)
+#ifdef Z_STEPPER_ALIGN
+  /**
+    G34: bit 0 steps Z, bit 1 Z2. Both set except while G34 moves one of
+    them alone (Z steps are GPIO pulses then, see step_timers.c).
+  */
+  extern volatile uint8_t z_step_mask;
+  #define step_add_z(s) do { \
+      if (z_step_mask & 1) STEP_ADD_BITS(s, STEP_Z_BIT); \
+      if (z_step_mask & 2) STEP_ADD_BITS(s, STEP_Z2_BIT); \
+    } while (0)
+#else
+  #define step_add_z(s)   STEP_ADD_BITS(s, STEP_ZZ2_BIT)
+#endif
 #define step_add_e(s)   STEP_ADD_BITS(s, STEP_E_BIT)
 
 /// Whether any GPIO step pin is to be raised.

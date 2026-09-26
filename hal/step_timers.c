@@ -97,10 +97,11 @@ void step_timers_init(void) {
 
   step_timer[0] = setup_group(&x, NULL, 0);
   step_timer[1] = setup_group(&y, NULL, 1);
-  #if defined Z_STEP_PIN && defined Z_DIR_PIN
+  #if defined Z_STEP_PIN && defined Z_DIR_PIN && ! defined Z_STEPPER_ALIGN
   {
+    // (G34 steps Z and Z2 separately: GPIO pulses.)
     const step_pin_t z = STEP_PIN_INFO(Z_STEP_PIN);
-    #if defined Z2_STEP_PIN && defined Z2_DIR_PIN
+    #if defined Z2_STEP_PIN
       const step_pin_t z2 = STEP_PIN_INFO(Z2_STEP_PIN);
       step_timer[2] = setup_group(&z, &z2, 2);
     #else
