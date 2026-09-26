@@ -115,7 +115,7 @@ else:
 GROUPS = [
     ('step ISR', r'^(TIM5_IRQHandler|queue_step|dda_step|dda_start|timer_set|timer_step_pulse_end|unstep|TIM[0-9]+_IRQHandler)$'),
     ('dda_clock (PendSV)', r'^(PendSV_Handler|dda_clock|update_current_position)$'),
-    ('planner', r'^(dda_create|dda_find_crossing_speed|dda_join_moves|dda_new_startpoint|enqueue_home|approx_distance.*|int_sqrt|int_f_sqrt|int_inv_sqrt|muldiv.*|acc_ramp_len|dda_.*|__aeabi_.*div.*|__udivmoddi4|__divdi3|__udivdi3)$'),
+    ('planner', r'^(dda_create|dda_find_crossing_speed|dda_plan|dda_new_startpoint|enqueue_home|approx_distance.*|int_sqrt|int_f_sqrt|int_inv_sqrt|muldiv.*|acc_ramp_len|dda_.*|__aeabi_.*div.*|__udivmoddi4|__divdi3|__udivdi3)$'),
     ('arc math', r'^(arc_move|apply_soft_limits|sinf|cosf|atan2f|__ieee754.*|__kernel.*|floorf|ceilf|sqrtf)$'),
     ('G-code parse/execute', r'^(gcode_parse_char|process_gcode_command|decfloat_to_int|finish_line|serwrite.*|sersendf.*|write_.*|temp_wait|restore_axis_word|seen_axes)$'),
     ('USB / UART I/O', r'^(serial_writechar|serial_writestr|uart_writechar|uart_popchar|usb_cdc_writechar|usb_cdc_popchar|usb_irq|OTG_FS_IRQHandler|rx_.*|tx_.*|ep0_.*|ep_write_packet|USART.*|DMA.*|usb_poll|wait_mode)$'),

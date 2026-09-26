@@ -92,6 +92,42 @@ int8_t get_direction(DDA *dda, enum axis_e n) {
     return -1;
 }
 
+#ifdef ACCELERATION_RAMPING
+/**
+  Step interval at ramp position n, n steps from standstill on the fast axis.
+
+  \param dda the move, needs fast_axis and c_min.
+  \param n   ramp position, see acc_ramp_len().
+
+  \return Timer ticks between two steps, not below dda->c_min.
+*/
+TEACUP_HOT
+uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
+  uint32_t c;
+
+  if (n == 0)
+    c = (c0_P[dda->fast_axis]);
+  else
+    // Explicit formula: c0 * (sqrt(n + 1) - sqrt(n)),
+    // approximation here: c0 * (1 / (2 * sqrt(n))).
+    // This >> 13 looks odd, but is verified with the explicit formula.
+    #if __FPU_PRESENT
+    // Exact square root, not rounded to an integer: with look-ahead moves
+    // run near the top of their ramps, where n is a few hundred only and
+    // one unit of sqrt(n) would be a speed step of 5 %.
+    c = (uint32_t)((float)(c0_P[dda->fast_axis]) /
+                   (2.0f * teacup_sqrtf((float)n)));
+    #else
+    c = ((c0_P[dda->fast_axis]) * int_inv_sqrt(n)) >> 13;
+    #endif
+
+  if (c < dda->c_min)
+    c = dda->c_min;
+
+  return c;
+}
+#endif /* ACCELERATION_RAMPING */
+
 /*! Inititalise DDA movement structures
 */
 void dda_update_settings(void) {
@@ -161,8 +197,8 @@ void dda_new_startpoint(void) {
  * 5. Nullmove due to movement smaller than a single step. Shouldn't interrupt
  *    lookahead either, but this small distance should be added to the next
  *    movement.
- * 6. Lookahead calculation too slow. This is handled in dda_join_moves()
- *    already.
+ * 6. Lookahead calculation too slow, a move became live meanwhile. This is
+ *    handled in dda_plan() already.
  */
 TEACUP_HOT
 void dda_create(DDA *dda, const TARGET *target) {
@@ -446,23 +482,9 @@ void dda_create(DDA *dda, const TARGET *target) {
       #ifdef LOOKAHEAD
         dda->distance = distance;
         dda_find_crossing_speed(prev_dda, dda);
-        // TODO: this should become a reverse-stepping through the existing
-        //       movement queue to allow higher speeds for short moves.
-        //       dda_find_crossing_speed() is required only once.
-        dda_join_moves(prev_dda, dda);
-        dda->n = dda->start_steps;
-        if (dda->n == 0)
-          dda->c = (c0_P[dda->fast_axis]);
-        else
-          #if __FPU_PRESENT
-          dda->c = ((c0_P[dda->fast_axis]) /
-                    (2 * int_f_sqrt(dda->n)));
-          #else
-          dda->c = ((c0_P[dda->fast_axis]) *
-                    int_inv_sqrt(dda->n)) >> 13;
-          #endif
-        if (dda->c < dda->c_min)
-          dda->c = dda->c_min;
+        // Re-plan entry and exit speeds of the whole queue, this move ends
+        // with a full stop. Also sets dda->n and dda->c.
+        dda_plan(dda);
       #else
         dda->n = 0;
         dda->c = (c0_P[dda->fast_axis]);
@@ -802,7 +824,9 @@ void dda_clock(void) {
   #ifdef ACCELERATION_RAMPING
   uint32_t move_step_no, move_step, move_c;
   int32_t move_n;
+  #ifndef LOOKAHEAD
   uint8_t recalc_speed;
+  #endif
   uint8_t current_id ;
   #endif
 
@@ -937,21 +961,40 @@ void dda_clock(void) {
 
     move_step_no = dda->total_steps - move_step;
 
+  #ifdef LOOKAHEAD
+    /**
+      The speed profile is the lowest of: accelerating from the entry speed
+      (start_steps), decelerating to the exit speed (end_steps) and
+      cruising (c_min). This needs no rampup_steps and rampdown_steps, so
+      the planner can change the speed at a junction of two moves by writing
+      end_steps of the one and start_steps of the other only, see dda_plan().
+      It does so only while neither of them is live.
+
+      After an endstop stop start_steps and end_steps are zero (no joining
+      for moves with endstop checks) and total_steps is twice the steps to
+      go, so this decelerates to a stop, too.
+    */
+    move_n = (int32_t)(dda->start_steps + move_step_no);
+    if (dda->end_steps + move_step < (uint32_t)move_n)
+      move_n = (int32_t)(dda->end_steps + move_step);
+    move_c = dda_c_for_n(dda, (uint32_t)move_n);
+
+    ATOMIC_START();
+      // Apply only if dda didn't change underneath us, e.g. because the
+      // next move became live meanwhile.
+      if (current_id == dda->id) {
+        dda->c = move_c;
+        dda->n = move_n;
+      }
+    ATOMIC_END();
+  #else
     recalc_speed = 0;
     if (move_step_no <= dda->rampup_steps) {
-      #ifdef LOOKAHEAD
-        move_n = dda->start_steps + move_step_no;
-      #else
-        move_n = move_step_no;
-      #endif
+      move_n = move_step_no;
       recalc_speed = 1;
     }
     else if (move_step_no >= dda->rampdown_steps) {
-      #ifdef LOOKAHEAD
-        move_n = move_step + dda->end_steps;
-      #else
-        move_n = move_step;
-      #endif
+      move_n = move_step;
       recalc_speed = 1;
     }
     if (recalc_speed) {
@@ -976,11 +1019,8 @@ void dda_clock(void) {
         // This is a hack which deals with movements with an unknown number of
         // acceleration steps. dda_create() sets a very high number, then,
         // but we don't want to re-calculate all the time.
-        // This hack doesn't work with lookahead.
-        #ifndef LOOKAHEAD
-          dda->rampup_steps = move_step_no;
-          dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
-        #endif
+        dda->rampup_steps = move_step_no;
+        dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
       }
 
       // Write results.
@@ -1008,7 +1048,8 @@ void dda_clock(void) {
           dda->c = dda->c_min;
       ATOMIC_END();
     }
-  #endif
+  #endif /* LOOKAHEAD */
+  #endif /* ACCELERATION_RAMPING */
 }
 
 /// update global current_position struct
