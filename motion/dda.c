@@ -26,6 +26,7 @@
 #include "settings.h"
 #include "filament.h"
 #include "linear_advance.h"
+#include "input_shaping.h"
 
 #include "atomic.h"
 
@@ -632,9 +633,20 @@ TEACUP_STEP_RAMFUNC void dda_start(DDA *dda) {
   #endif
 
   // Set direction outputs. With linear advance the E generator sets the E
-  // direction, see motion/linear_advance.c.
-  x_direction(dda->x_direction);
-  y_direction(dda->y_direction);
+  // direction, see motion/linear_advance.c, with input shaping the shaper
+  // those of shaped axes, see motion/input_shaping.c. Moves with endstop
+  // checks aren't shaped.
+  #ifdef INPUT_SHAPING
+    if (dda->endstop_check)
+      shaper_dir_unknown();
+    if ( ! shaper_on[0] || dda->endstop_check)
+      x_direction(dda->x_direction);
+    if ( ! shaper_on[1] || dda->endstop_check)
+      y_direction(dda->y_direction);
+  #else
+    x_direction(dda->x_direction);
+    y_direction(dda->y_direction);
+  #endif
   z_direction(dda->z_direction);
   #ifndef LINEAR_ADVANCE
     e_direction(dda->e_direction);
@@ -700,6 +712,11 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
       move_state.counter[X] -= dda->delta[X];
       if (move_state.counter[X] < 0) {
         move_state.counter[X] += dda->total_steps;
+        #ifdef INPUT_SHAPING
+          if (shaper_on[0] && ! dda->endstop_check)
+            shaper_step(0, dda->x_direction);
+          else
+        #endif
         step_x(&steps);
         move_state.steps[X]--;
       }
@@ -708,6 +725,11 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
       move_state.counter[Y] -= dda->delta[Y];
       if (move_state.counter[Y] < 0) {
         move_state.counter[Y] += dda->total_steps;
+        #ifdef INPUT_SHAPING
+          if (shaper_on[1] && ! dda->endstop_check)
+            shaper_step(1, dda->y_direction);
+          else
+        #endif
         step_y(&steps);
         move_state.steps[Y]--;
       }

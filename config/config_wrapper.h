@@ -162,6 +162,45 @@
   #define LINEAR_ADVANCE_K 0.0
 #endif
 
+/**
+  Input shaping and S-curve smoothing of X and Y step the axes on their
+  own, like linear advance does with E. Not with ACCELERATION_TEMPORAL,
+  which has a step path of its own.
+*/
+#if defined INPUT_SHAPING && ! defined ACCELERATION_RAMPING
+  #warning INPUT_SHAPING needs ACCELERATION_RAMPING, ignored.
+  #undef INPUT_SHAPING
+#endif
+#ifndef INPUT_SHAPING_BUFFER
+  #define INPUT_SHAPING_BUFFER 1024
+#endif
+#ifndef INPUT_SHAPING_FREQ_X
+  #define INPUT_SHAPING_FREQ_X 0.0
+#endif
+#ifndef INPUT_SHAPING_FREQ_Y
+  #define INPUT_SHAPING_FREQ_Y 0.0
+#endif
+#ifndef INPUT_SHAPING_DAMPING_X
+  #define INPUT_SHAPING_DAMPING_X 0.1
+#endif
+#ifndef INPUT_SHAPING_DAMPING_Y
+  #define INPUT_SHAPING_DAMPING_Y 0.1
+#endif
+#ifndef INPUT_SHAPING_TYPE_X
+  #define INPUT_SHAPING_TYPE_X 1
+#endif
+#ifndef INPUT_SHAPING_TYPE_Y
+  #define INPUT_SHAPING_TYPE_Y 1
+#endif
+#ifndef S_CURVE_TIME
+  #define S_CURVE_TIME 0
+#endif
+
+/// Auxiliary step generator (hal/timer.c) for linear advance and shaping.
+#if defined LINEAR_ADVANCE || defined INPUT_SHAPING
+  #define STEP_AUX
+#endif
+
 #if defined BED_LEVELING && defined LOOKAHEAD && MAX_JERK_Z == 0
   #warning When bed-leveling is activated, lookahead will be ineffective \
            because MAX_JERK_Z is zero.

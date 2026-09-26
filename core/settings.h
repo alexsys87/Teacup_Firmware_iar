@@ -18,6 +18,10 @@ typedef struct {
   uint32_t      accel_retract;  ///< M204 R, E-only moves, mm/s^2.
   uint32_t      accel_travel;   ///< M204 T, moves without E, mm/s^2.
   uint32_t      la_k;           ///< M900 K, linear advance, 1/10000 s.
+  uint32_t      is_freq[2];     ///< M593 F, shaping of X, Y, 1/100 Hz, 0 = off.
+  uint32_t      is_damp[2];     ///< M593 D, damping ratio, 1/1000.
+  uint32_t      is_type[2];     ///< M593 T, 0 = ZV, 1 = MZV.
+  uint32_t      s_curve_us;     ///< M593 S, S-curve smoothing of X/Y, us.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.

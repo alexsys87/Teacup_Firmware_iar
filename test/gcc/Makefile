@@ -14,7 +14,7 @@ TEST  ?= 0
 OPT      ?= -Os
 OPT_FAST ?= -O2
 FAST_SRC := dda.c dda_queue.c dda_maths.c dda_lookahead.c dda_kinematics.c \
-            linear_advance.c \
+            linear_advance.c input_shaping.c \
             timer.c serial.c uart.c usb_cdc.c endstops.c clock.c
 # LTO=-flto: cross-file inlining, like IAR's multi-file compilation.
 LTO      ?=

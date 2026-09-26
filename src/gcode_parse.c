@@ -208,6 +208,11 @@ uint8_t gcode_parse_char(uint8_t c) {
             serwrite_int32(next_target.target.axis[E]);
 					break;
 				case 'F':
+					// M593 F is a frequency, it must not change the feedrate.
+					if (next_target.seen_M && next_target.M == 593) {
+						next_target.F_milli = decfloat_to_int(&read_digit, 1000);
+						break;
+					}
 					// just use raw integer, we need move distance and n_steps to convert it to a useful value, so wait until we have those to convert it
 					// inch/min -> mm/min
 					if (next_target.option_inches)

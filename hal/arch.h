@@ -36,6 +36,13 @@
   #define TEACUP_INLINE     static inline
 #endif
 
+/// Keep a function out of line (e.g. as an address for test hooks).
+#if defined(__GNUC__) && ! defined(__ICCARM__)
+  #define TEACUP_NOINLINE   __attribute__((noinline))
+#else
+  #define TEACUP_NOINLINE   _Pragma("inline=never")
+#endif
+
 /// Silence 'unused parameter' warnings.
 #define TEACUP_UNUSED(x)  ((void)(x))
 

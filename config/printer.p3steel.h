@@ -128,6 +128,29 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define LINEAR_ADVANCE
 #define LINEAR_ADVANCE_K         0.0
 
+/** \def INPUT_SHAPING INPUT_SHAPING_BUFFER INPUT_SHAPING_FREQ_X INPUT_SHAPING_FREQ_Y INPUT_SHAPING_DAMPING_X INPUT_SHAPING_DAMPING_Y INPUT_SHAPING_TYPE_X INPUT_SHAPING_TYPE_Y S_CURVE_TIME
+  Input shaping of X and Y (M593): cancels ringing at the resonance
+  frequency of the axis, the i3's Y with the heavy bed rings the most.
+  Frequency in Hz, 0 = off (find it with a ringing tower: speed / distance
+  of the ripples), damping ratio (0.1 is typical), type 0 = ZV (shortest
+  delay), 1 = MZV (tolerates a wrong frequency better).
+  S_CURVE_TIME: S-curve smoothing of X and Y in ms, 0 = off: the
+  acceleration ramps up and down within this time.
+  INPUT_SHAPING_BUFFER: steps per axis kept for the delayed copies, a power
+  of 2, 4 bytes each. Enough for (largest delay + S_CURVE_TIME) at top
+  speed: MZV at 25 Hz is 30 ms delay, at 150 mm/s (24000 steps/s) with
+  10 ms S-curve 960 steps. More than that isn't shaped (M593 reports it).
+*/
+#define INPUT_SHAPING
+#define INPUT_SHAPING_BUFFER     2048
+#define INPUT_SHAPING_FREQ_X     0.0
+#define INPUT_SHAPING_FREQ_Y     0.0
+#define INPUT_SHAPING_DAMPING_X  0.1
+#define INPUT_SHAPING_DAMPING_Y  0.1
+#define INPUT_SHAPING_TYPE_X     1
+#define INPUT_SHAPING_TYPE_Y     1
+#define S_CURVE_TIME             0
+
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,

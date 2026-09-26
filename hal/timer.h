@@ -35,16 +35,19 @@ void timer_stop(void);
 */
 void timer_step_pulse_end(void);
 
-#ifdef LINEAR_ADVANCE
+#ifdef STEP_AUX
 /**
-  E generator of linear advance: compare channel 4 of the step timer calls
-  la_isr() 'delay' CPU ticks from now (0 = right away). From the step
-  interrupt or with interrupts locked.
+  Auxiliary step generator, see hal/timer.c. Each part (la_service(),
+  shaper_service()) returns the CPU ticks until it wants to run again, or
+  AUX_NONE.
 */
-void timer_e_set(uint32_t delay);
+#define AUX_NONE 0xFFFFFFFFUL
 
-/// No more calls of la_isr() by compare channel 4.
-void timer_e_off(void);
+/// Set in the step interrupt: run the auxiliary generator after this step.
+extern volatile uint8_t aux_kicked;
+
+/// Run the auxiliary generator right away, from any context.
+void timer_aux_kick(void);
 #endif
 
 /// Step interrupt statistics (M9001), all in CPU cycles.
