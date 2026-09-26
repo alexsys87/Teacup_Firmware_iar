@@ -193,6 +193,8 @@ if want('settings'):
     send('M203 X100\n'); run('0.05')
     mark('s_set'); send('M204 S500\nM205 X15\nM201 Z80\nM301 P10 I0.5 D50\n'); run('0.1')
     m503('s_changed')
+    mark('s_m204'); send('M204 P700 R3000\nM204 T800\n'); run('0.1')
+    m503('s_m204_changed')
     mark('s_m500'); send('M500\n'); run('0.2')
     mark('s_m502'); send('M502\n'); run('0.1')
     m503('s_after502')
@@ -595,19 +597,26 @@ if want('settings'):
     pm = pos('s_m203_mid')
     check('M203 X5: 5 mm/s', pm is not None and 14.0 <= pm[0] <= 16.0, pm)
     c = uart('s_changed')
-    check('M204/M205/M201/M301 reported', m503_line('s_changed', 'M204') == 'M204 P500.00 R500.00 T500.00'
+    # M204 S sets printing and travel, R keeps the default (ACCELERATION).
+    check('M204/M205/M201/M301 reported', m503_line('s_changed', 'M204') == 'M204 P500.00 R1000.00 T500.00'
           and m503_line('s_changed', 'M205').startswith('M205 X15.00')
           and m503_line('s_changed', 'M201').endswith('Z80.00 E1000.00')
           and m503_line('s_changed', 'M301') == 'M301 P10.00 I0.50 D50.00', c)
+    check('M204 P R T set separately', m503_line('s_m204_changed', 'M204') == 'M204 P700.00 R3000.00 T800.00',
+          m503_line('s_m204_changed', 'M204'))
     check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('s_m500')), uart('s_m500'))
     check('M502 defaults', 'echo:Hardcoded Default Settings Loaded' in uart('s_m502')
           and m503_line('s_after502', 'M92').startswith('M92 X40.00'), m503_line('s_after502', 'M92'))
     check('M501 loads', any('Stored settings retrieved' in l for l in uart('s_m501'))
           and m503_line('s_after501', 'M92').startswith('M92 X80.00')
-          and m503_line('s_after501', 'M301') == 'M301 P10.00 I0.50 D50.00', m503_line('s_after501', 'M92'))
+          and m503_line('s_after501', 'M301') == 'M301 P10.00 I0.50 D50.00'
+          and m503_line('s_after501', 'M204') == 'M204 P700.00 R3000.00 T800.00',
+          (m503_line('s_after501', 'M92'), m503_line('s_after501', 'M204')))
     # Boot messages: UART only (USB isn't enumerated yet at boot).
     check('after reset: loaded from Flash', any('Stored settings retrieved' in l for l in serial0('s_reset'))
-          and m503_line('s_after_reset', 'M92').startswith('M92 X80.00'), (uart('s_reset'), m503_line('s_after_reset', 'M92')))
+          and m503_line('s_after_reset', 'M92').startswith('M92 X80.00')
+          and m503_line('s_after_reset', 'M204') == 'M204 P700.00 R3000.00 T800.00',
+          (uart('s_reset'), m503_line('s_after_reset', 'M92'), m503_line('s_after_reset', 'M204')))
     check('10 saves (erase), newest survives reset', m503_line('s_after_many', 'M92') == 'M92 X80.00 Y50.00 Z320.00 E96.27',
           m503_line('s_after_many', 'M92'))
 

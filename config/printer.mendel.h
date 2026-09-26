@@ -72,10 +72,14 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 //#define ACCELERATION_RAMPING
 //#define ACCELERATION_TEMPORAL
 
-/** \def ACCELERATION
-  Acceleration for ACCELERATION_RAMPING and homing, mm/s^2.
+/** \def ACCELERATION ACCELERATION_RETRACT ACCELERATION_TRAVEL
+  Acceleration along the path for ACCELERATION_RAMPING, mm/s^2: printing
+  (M204 P), retracts (E only, M204 R), travel and homing (no E, M204 T).
+  Retract and travel default to ACCELERATION.
 */
 #define ACCELERATION             1000
+//#define ACCELERATION_RETRACT     5000
+//#define ACCELERATION_TRAVEL      1000
 
 /** \def MAX_ACCELERATION_X MAX_ACCELERATION_Y MAX_ACCELERATION_Z MAX_ACCELERATION_E
   Optional max. acceleration per axis (M201), mm/s^2. Default: ACCELERATION.

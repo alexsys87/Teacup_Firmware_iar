@@ -13,16 +13,18 @@ typedef struct {
   axes_uint32_t steps_per_m;    ///< M92, steps per meter.
   axes_uint32_t max_feedrate;   ///< M203, mm/min.
   axes_uint32_t max_accel;      ///< M201, mm/s^2 per axis.
-  uint32_t      acceleration;   ///< M204, mm/s^2.
+  uint32_t      acceleration;   ///< M204 P, printing moves, mm/s^2.
   axes_uint32_t max_jerk;       ///< M205, mm/min.
+  uint32_t      accel_retract;  ///< M204 R, E-only moves, mm/s^2.
+  uint32_t      accel_travel;   ///< M204 T, moves without E, mm/s^2.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.
 extern settings_t settings;
 
 /**
-  Acceleration used for moves where 'axis' is the fast axis:
-  the lower of M204 and the M201 value of that axis.
+  Acceleration of a travel move of 'axis' alone (e.g. homing): the lower
+  of M204 T and the M201 value of that axis.
 */
 uint32_t settings_axis_accel(enum axis_e axis);
 

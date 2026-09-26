@@ -129,6 +129,8 @@ typedef struct {
   uint32_t          rampdown_steps;
   /// 24.8 fixed point timer value, maximum speed
   uint32_t          c_min;
+  /// Step interval from standstill, depends on the acceleration of the move
+  uint32_t          c0;
   #ifdef LOOKAHEAD
   // With the look-ahead functionality, it is possible to retain physical
   // movement between G1 moves. These variables keep track of the entry and
@@ -194,9 +196,6 @@ int8_t get_direction(DDA *dda, enum axis_e n);
 // initialize dda structures
 void dda_init(void);
 
-/// Recalculate constants from the runtime settings (acceleration).
-void dda_update_settings(void);
-
 // distribute a new startpoint
 void dda_new_startpoint(void);
 
@@ -208,6 +207,7 @@ void dda_start(DDA *dda);
 
 #ifdef ACCELERATION_RAMPING
 /// Step interval (timer ticks) at ramp position n, not below dda->c_min.
+/// Uses dda->c0.
 uint32_t dda_c_for_n(const DDA *dda, uint32_t n);
 #endif
 

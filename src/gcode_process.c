@@ -1325,21 +1325,30 @@ void process_gcode_command(void) {
         break;
 
       case 204:
-        //? --- M204: Set acceleration ---
+        //? --- M204: Set acceleration, mm/s^2 ---
         //?
-        //? Example: M204 S1000   (also P, for Marlin compatibility)
+        //? Example: M204 P1000 R5000 T1500
         //?
-        //? Teacup has one acceleration for printing, retracting and travel.
-        //? The acceleration of a move is the lower of this and the M201
-        //? value of its fastest axis.
+        //? P: printing moves (with E), R: retracts and primes (E only),
+        //? T: travel (no E). S sets P and T, like Marlin. Without
+        //? parameters: report (see M503).
         //?
-        if (next_target.seen_S || next_target.seen_P) {
-          uint32_t acc = next_target.seen_S ? (uint32_t)next_target.S
-                                            : (uint32_t)next_target.P;
-          if (acc >= 1) {
-            settings.acceleration = acc;
-            settings_apply();
-          }
+        //? The acceleration applies along the path. It's reduced where one
+        //? axis would get more than its M201 limit, e.g. Z moves get the
+        //? M201 Z value. Queued moves keep their acceleration.
+        //?
+        if (next_target.seen_S || next_target.seen_P ||
+            next_target.seen_R || next_target.seen_T) {
+          if (next_target.seen_S && next_target.S >= 1)
+            settings.acceleration = settings.accel_travel =
+              (uint32_t)next_target.S;
+          if (next_target.seen_P && next_target.P >= 1)
+            settings.acceleration = next_target.P;
+          if (next_target.seen_R && next_target.R >= 1)
+            settings.accel_retract = (uint32_t)next_target.R;
+          if (next_target.seen_T && next_target.T_value >= 1)
+            settings.accel_travel = (uint32_t)next_target.T_value;
+          settings_apply();
         }
         else {
           settings_report();

@@ -5,7 +5,8 @@
   M500 stores the current values in Flash (see hal/flash_store.c), they're
   loaded at startup. M502 restores the defaults, M503 reports.
 
-  Stored: steps per mm, max. feedrates, max. accelerations, acceleration,
+  Stored: steps per mm, max. feedrates, max. accelerations, accelerations
+  for printing, retracts and travel,
   jerk, home offsets, PID values of all heaters, stepper idle timeout,
   Z offset (M290), probe offset (M851), filament runout (M412), bed
   leveling mesh and state (G29, M420, M421). The layout is the same with
@@ -33,8 +34,8 @@
 #include "gcode_parse.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except version 1, which gets converted.
-#define SETTINGS_VERSION 2
+/// except versions 1 and 2, which get converted.
+#define SETTINGS_VERSION 3
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -48,6 +49,12 @@
 #ifndef MAX_ACCELERATION_E
   #define MAX_ACCELERATION_E ACCELERATION
 #endif
+#ifndef ACCELERATION_RETRACT
+  #define ACCELERATION_RETRACT ACCELERATION
+#endif
+#ifndef ACCELERATION_TRAVEL
+  #define ACCELERATION_TRAVEL ACCELERATION
+#endif
 #ifndef MAX_JERK_X
   #define MAX_JERK_X 0
   #define MAX_JERK_Y 0
@@ -57,9 +64,18 @@
 
 settings_t settings;
 
+/// Motion settings as stored in version 1 and 2, don't change.
+typedef struct {
+  axes_uint32_t steps_per_m;
+  axes_uint32_t max_feedrate;
+  axes_uint32_t max_accel;
+  uint32_t      acceleration;
+  axes_uint32_t max_jerk;
+} settings_motion_v1_t;
+
 /// Everything stored in Flash, version 1. Word aligned, no pointers.
 typedef struct {
-  settings_t motion;
+  settings_motion_v1_t motion;
   int32_t    home_offset[3];
   uint32_t   stepper_idle_timeout;
   struct {
@@ -75,10 +91,17 @@ typedef struct {
   int32_t    runout_distance;   ///< M412 D, um.
   uint32_t   runout_enabled;    ///< M412 S.
   mesh_t     mesh;              ///< G29, M420, M421.
+} settings_store_v2_t;
+
+/// Version 3: version 2 plus retract and travel acceleration (M204 R T).
+typedef struct {
+  settings_store_v2_t v2;
+  uint32_t   accel_retract;
+  uint32_t   accel_travel;
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
-  uint32_t a = settings.acceleration;
+  uint32_t a = settings.accel_travel;
 
   if (settings.max_accel[axis] < a)
     a = settings.max_accel[axis];
@@ -101,6 +124,8 @@ void settings_defaults(void) {
   settings.max_accel[Z] = MAX_ACCELERATION_Z;
   settings.max_accel[E] = MAX_ACCELERATION_E;
   settings.acceleration = ACCELERATION;
+  settings.accel_retract = ACCELERATION_RETRACT;
+  settings.accel_travel = ACCELERATION_TRAVEL;
   settings.max_jerk[X] = MAX_JERK_X;
   settings.max_jerk[Y] = MAX_JERK_Y;
   settings.max_jerk[Z] = MAX_JERK_Z;
@@ -126,14 +151,17 @@ void settings_defaults(void) {
 
 void settings_apply(void) {
   dda_maths_update();
-  dda_update_settings();
 }
 
 /// Everything of version 1 into the store.
 static void store_v1(settings_store_v1_t *v1) {
   uint8_t i;
 
-  v1->motion = settings;
+  memcpy(v1->motion.steps_per_m, settings.steps_per_m, sizeof(axes_uint32_t));
+  memcpy(v1->motion.max_feedrate, settings.max_feedrate, sizeof(axes_uint32_t));
+  memcpy(v1->motion.max_accel, settings.max_accel, sizeof(axes_uint32_t));
+  v1->motion.acceleration = settings.acceleration;
+  memcpy(v1->motion.max_jerk, settings.max_jerk, sizeof(axes_uint32_t));
   for (i = 0; i < 3; i++)
     v1->home_offset[i] = home_offset[i];
   v1->stepper_idle_timeout = steppers_get_idle_timeout();
@@ -146,7 +174,11 @@ static void store_v1(settings_store_v1_t *v1) {
 static void load_v1(const settings_store_v1_t *v1) {
   uint8_t i;
 
-  settings = v1->motion;
+  memcpy(settings.steps_per_m, v1->motion.steps_per_m, sizeof(axes_uint32_t));
+  memcpy(settings.max_feedrate, v1->motion.max_feedrate, sizeof(axes_uint32_t));
+  memcpy(settings.max_accel, v1->motion.max_accel, sizeof(axes_uint32_t));
+  settings.acceleration = v1->motion.acceleration;
+  memcpy(settings.max_jerk, v1->motion.max_jerk, sizeof(axes_uint32_t));
   for (i = 0; i < 3; i++)
     home_offset[i] = v1->home_offset[i];
   steppers_set_idle_timeout((uint16_t)v1->stepper_idle_timeout);
@@ -160,27 +192,30 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
+  settings_store_v2_t *v2 = &store.v2;
 
   memset(&store, 0, sizeof(store));
-  store_v1(&store.v1);
+  store_v1(&v2->v1);
   #ifdef BABYSTEPPING
-    store.z_offset = babystep_offset();
+    v2->z_offset = babystep_offset();
   #endif
   #ifdef Z_PROBE
-    store.probe_offset[X] = probe_offset[X];
-    store.probe_offset[Y] = probe_offset[Y];
-    store.probe_offset[Z] = probe_offset[Z];
+    v2->probe_offset[X] = probe_offset[X];
+    v2->probe_offset[Y] = probe_offset[Y];
+    v2->probe_offset[Z] = probe_offset[Z];
   #endif
   #ifdef FILAMENT_RUNOUT_PIN
-    store.runout_distance = filament_runout_distance();
-    store.runout_enabled = filament_runout_enabled();
+    v2->runout_distance = filament_runout_distance();
+    v2->runout_enabled = filament_runout_enabled();
   #else
-    store.runout_distance = -1;
-    store.runout_enabled = 1;
+    v2->runout_distance = -1;
+    v2->runout_enabled = 1;
   #endif
   #ifdef BED_LEVELING
-    store.mesh = mesh;
+    v2->mesh = mesh;
   #endif
+  store.accel_retract = settings.accel_retract;
+  store.accel_travel = settings.accel_travel;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -190,45 +225,61 @@ uint8_t settings_save(void) {
   return 1;
 }
 
-uint8_t settings_load(void) {
-  static settings_store_t store;
-
-  if ( ! flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    // Older record without the new fields? Take what's there.
-    if (flash_store_read(&store.v1, sizeof(store.v1), 1)) {
-      load_v1(&store.v1);
-      sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
-                 (uint16_t)sizeof(store.v1),
-                 flash_store_crc32(&store.v1, sizeof(store.v1)));
-      return 1;
-    }
-    return 0;
-  }
-
-  load_v1(&store.v1);
+/// Version 2 part from the store.
+static void load_v2(const settings_store_v2_t *v2) {
+  load_v1(&v2->v1);
   #ifdef BABYSTEPPING
-    babystep_set_offset(store.z_offset);
+    babystep_set_offset(v2->z_offset);
   #endif
   #ifdef Z_PROBE
-    probe_offset[X] = store.probe_offset[X];
-    probe_offset[Y] = store.probe_offset[Y];
-    probe_offset[Z] = store.probe_offset[Z];
+    probe_offset[X] = v2->probe_offset[X];
+    probe_offset[Y] = v2->probe_offset[Y];
+    probe_offset[Z] = v2->probe_offset[Z];
   #endif
   #ifdef FILAMENT_RUNOUT_PIN
-    if (store.runout_distance >= 0)
-      filament_runout_set((int8_t)(store.runout_enabled ? 1 : 0),
-                          store.runout_distance);
+    if (v2->runout_distance >= 0)
+      filament_runout_set((int8_t)(v2->runout_enabled ? 1 : 0),
+                          v2->runout_distance);
   #endif
   #ifdef BED_LEVELING
-    if (store.mesh.nx <= 7 && store.mesh.ny <= 7) {
-      mesh = store.mesh;
+    if (v2->mesh.nx <= 7 && v2->mesh.ny <= 7) {
+      mesh = v2->mesh;
       zcorr_sync_logical();
     }
   #endif
+}
 
-  sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
-             (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
-  return 1;
+uint8_t settings_load(void) {
+  static settings_store_t store;
+
+  if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
+    load_v2(&store.v2);
+    if (store.accel_retract)
+      settings.accel_retract = store.accel_retract;
+    if (store.accel_travel)
+      settings.accel_travel = store.accel_travel;
+    sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
+               (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
+    return 1;
+  }
+
+  // Older records without the new fields? Take what's there, the new
+  // fields keep their values.
+  if (flash_store_read(&store.v2, sizeof(store.v2), 2)) {
+    load_v2(&store.v2);
+    sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
+               (uint16_t)sizeof(store.v2),
+               flash_store_crc32(&store.v2, sizeof(store.v2)));
+    return 1;
+  }
+  if (flash_store_read(&store.v2.v1, sizeof(store.v2.v1), 1)) {
+    load_v1(&store.v2.v1);
+    sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
+               (uint16_t)sizeof(store.v2.v1),
+               flash_store_crc32(&store.v2.v1, sizeof(store.v2.v1)));
+    return 1;
+  }
+  return 0;
 }
 
 void settings_init(void) {
@@ -307,8 +358,8 @@ void settings_report(void) {
 
   serial_writestr("echo:; Acceleration (units/s2): P<print_accel> R<retract_accel> T<travel_accel>\n");
   serial_writestr("echo:  M204 P"); write_milli2((int32_t)s->acceleration * 1000);
-  serial_writestr(" R"); write_milli2((int32_t)s->acceleration * 1000);
-  serial_writestr(" T"); write_milli2((int32_t)s->acceleration * 1000);
+  serial_writestr(" R"); write_milli2((int32_t)s->accel_retract * 1000);
+  serial_writestr(" T"); write_milli2((int32_t)s->accel_travel * 1000);
   serial_writechar('\n');
 
   serial_writestr("echo:; Advanced: X<max_x_jerk> Y<max_y_jerk> Z<max_z_jerk> E<max_e_jerk>\n");
