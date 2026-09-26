@@ -25,6 +25,7 @@
 #include "graycode.h"
 #include "settings.h"
 #include "filament.h"
+#include "linear_advance.h"
 
 #include "atomic.h"
 
@@ -126,6 +127,8 @@ uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
   \param dda      the move, needs delta[].
   \param delta_um distance of each axis, um.
   \param distance length of the path, um.
+  \param la_kr    linear advance K (s) times mm of filament per mm of path,
+                  0 without linear advance.
 
   M204 R for retracts and primes (E only), M204 T for travel (no E),
   M204 P for printing, like Marlin. Each axis gets its share of the
@@ -133,9 +136,13 @@ uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
   the M201 limit of that axis, the acceleration is reduced. So a diagonal
   accelerates with the M204 value, not with the value of its fast axis
   times sqrt(2).
+
+  With linear advance the extruder gets an extra speed of K * a * (E per
+  path) while accelerating. Like Marlin, the acceleration is reduced so this
+  stays below the E jerk (M205 E).
 */
 static float move_acceleration(const DDA *dda, const axes_uint32_t delta_um,
-                               uint32_t distance) {
+                               uint32_t distance, float la_kr) {
   float acc, limit;
   enum axis_e i;
 
@@ -150,6 +157,12 @@ static float move_acceleration(const DDA *dda, const axes_uint32_t delta_um,
     if (delta_um[i] == 0)
       continue;
     limit = (float)settings.max_accel[i] * (float)distance / (float)delta_um[i];
+    if (limit < acc)
+      acc = limit;
+  }
+
+  if (la_kr > 0.f && settings.max_jerk[E]) {
+    limit = (float)settings.max_jerk[E] / 60.f / la_kr;
     if (limit < acc)
       acc = limit;
   }
@@ -496,8 +509,28 @@ void dda_create(DDA *dda, const TARGET *target) {
           steps/m -> steps/mm, factor 2).
         */
         float ratio = distance ? (float)dda->fast_um / (float)distance : 1.f;
-        float acc_fast = move_acceleration(dda, delta_um, distance) * ratio;
-        float spm = (float)settings.steps_per_m[dda->fast_axis];
+        float la_kr = 0.f;
+        float acc_fast, spm;
+
+        #ifdef LINEAR_ADVANCE
+          /**
+            Linear advance for printing moves: X or Y with E forward, not
+            much more E than path (no primes or wipes with E), like Marlin.
+            Advance in E steps = la_factor / c, K * E steps per second.
+          */
+          dda->la_factor = 0.f;
+          if (settings.la_k && dda->delta[E] && dda->e_direction &&
+              (dda->delta[X] || dda->delta[Y]) && distance &&
+              delta_um[E] <= 3 * distance) {
+            float k = (float)settings.la_k * 0.0001f;
+
+            la_kr = k * (float)delta_um[E] / (float)distance;
+            dda->la_factor = k * (float)F_CPU * (float)dda->delta[E] /
+                             (float)dda->total_steps;
+          }
+        #endif
+        acc_fast = move_acceleration(dda, delta_um, distance, la_kr) * ratio;
+        spm = (float)settings.steps_per_m[dda->fast_axis];
         float ramp_div, ramp, fast_f;
 
         if (acc_fast < 1.f)
@@ -598,11 +631,14 @@ TEACUP_STEP_RAMFUNC void dda_start(DDA *dda) {
       filament_e_steps += dda->delta[E];
   #endif
 
-  // Set direction outputs.
+  // Set direction outputs. With linear advance the E generator sets the E
+  // direction, see motion/linear_advance.c.
   x_direction(dda->x_direction);
   y_direction(dda->y_direction);
   z_direction(dda->z_direction);
-  e_direction(dda->e_direction);
+  #ifndef LINEAR_ADVANCE
+    e_direction(dda->e_direction);
+  #endif
 
   #ifdef DC_EXTRUDER
     if (dda->delta[E])
@@ -688,7 +724,11 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
       move_state.counter[E] -= dda->delta[E];
       if (move_state.counter[E] < 0) {
         move_state.counter[E] += dda->total_steps;
-        step_e(&steps);
+        #ifdef LINEAR_ADVANCE
+          la_step_e(dda->e_direction);
+        #else
+          step_e(&steps);
+        #endif
         move_state.steps[E]--;
       }
     }
@@ -869,6 +909,10 @@ void dda_clock(void) {
   #ifndef LOOKAHEAD
   uint8_t recalc_speed;
   #endif
+  #ifdef LINEAR_ADVANCE
+  float la_adv;
+  int32_t la_adv_steps;
+  #endif
   uint8_t current_id ;
   #endif
 
@@ -882,8 +926,12 @@ void dda_clock(void) {
     last_dda = dda;
   }
 
-  if (dda == NULL)
+  if (dda == NULL) {
+    #ifdef LINEAR_ADVANCE
+      la_set_advance(0);
+    #endif
     return;
+  }
 
   // Caution: we mangle step counters here without locking interrupts. This
   //          means, we trust dda isn't changed behind our back, which could
@@ -1020,6 +1068,11 @@ void dda_clock(void) {
     if (dda->end_steps + move_step < (uint32_t)move_n)
       move_n = (int32_t)(dda->end_steps + move_step);
     move_c = dda_c_for_n(dda, (uint32_t)move_n);
+    #ifdef LINEAR_ADVANCE
+      // Advance = K * E steps per second = la_factor / c.
+      la_adv = dda->la_factor / (float)move_c;
+      la_adv_steps = (la_adv < 1000000.f) ? (int32_t)(la_adv + 0.5f) : 1000000;
+    #endif
 
     ATOMIC_START();
       // Apply only if dda didn't change underneath us, e.g. because the
@@ -1027,6 +1080,9 @@ void dda_clock(void) {
       if (current_id == dda->id) {
         dda->c = move_c;
         dda->n = move_n;
+        #ifdef LINEAR_ADVANCE
+          la_set_advance(la_adv_steps);
+        #endif
       }
     ATOMIC_END();
   #else

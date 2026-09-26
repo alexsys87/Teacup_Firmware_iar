@@ -131,6 +131,10 @@ typedef struct {
   uint32_t          c_min;
   /// Step interval from standstill, depends on the acceleration of the move
   uint32_t          c0;
+  #ifdef LINEAR_ADVANCE
+  /// Linear advance: advance in E steps = la_factor / c. 0 = none.
+  float             la_factor;
+  #endif
   #ifdef LOOKAHEAD
   // With the look-ahead functionality, it is possible to retain physical
   // movement between G1 moves. These variables keep track of the entry and

@@ -42,6 +42,7 @@ typedef struct {
 		uint8_t					seen_C	:1;
 		uint8_t					seen_U	:1;
 		uint8_t					seen_L	:1;
+		uint8_t					seen_K	:1;
 		uint8_t					seen_N	:1;
 		uint8_t					seen_checksum				:1; ///< seen a checksum?
 		uint8_t					seen_semi_comment		:1; ///< seen a semicolon?
@@ -67,6 +68,7 @@ typedef struct {
   uint8_t           U;          ///< U word (M303 apply)
   int32_t           U_milli;    ///< U word in thousandths (M600 unload length)
   int32_t           L_milli;    ///< L word in thousandths (M600 load length)
+  int32_t           K_value;    ///< K word in 1/10000 (M900 linear advance)
   uint16_t          P;          ///< P word (various uses)
 
 	uint16_t						G;				///< G command number

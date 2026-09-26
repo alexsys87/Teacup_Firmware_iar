@@ -15,6 +15,7 @@
 #include "clock.h"
 #include "cpu.h"
 #include "babystep.h"
+#include "linear_advance.h"
 
 /**
   Movebuffer head pointer. Points to the last move in the queue. This variable
@@ -178,11 +179,19 @@ void queue_flush(void) {
   }
   mb_tail = head;
   mb_tail_dda = NULL;
+  #ifdef LINEAR_ADVANCE
+    la_flush();
+  #endif
 }
 
-/// wait for queue to empty, including babysteps
+/// wait for queue to empty, including babysteps and linear advance
 void queue_wait(void) {
   // Babysteps are movements, too (homing, probing, M400 wait for them).
-  while (mb_tail_dda != NULL || babystep_busy())
+  // So is the extruder taking back its advance after the last move.
+  while (mb_tail_dda != NULL || babystep_busy()
+         #ifdef LINEAR_ADVANCE
+           || la_busy()
+         #endif
+        )
     clock_poll();
 }

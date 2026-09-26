@@ -35,6 +35,18 @@ void timer_stop(void);
 */
 void timer_step_pulse_end(void);
 
+#ifdef LINEAR_ADVANCE
+/**
+  E generator of linear advance: compare channel 4 of the step timer calls
+  la_isr() 'delay' CPU ticks from now (0 = right away). From the step
+  interrupt or with interrupts locked.
+*/
+void timer_e_set(uint32_t delay);
+
+/// No more calls of la_isr() by compare channel 4.
+void timer_e_off(void);
+#endif
+
 /// Step interrupt statistics (M9001), all in CPU cycles.
 typedef struct {
   uint32_t count;       ///< Step interrupts.

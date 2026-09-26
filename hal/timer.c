@@ -19,6 +19,7 @@
 #include "dda_queue.h"
 #include "atomic.h"
 #include "babystep.h"
+#include "linear_advance.h"
 
 #if TICK_TIME > 0xFFFFFF
   #error TICK_TIME too large for the 24 bit SysTick timer.
@@ -86,6 +87,7 @@ void step_stats_reset(void) {
 /// Bit numbers in TIM5->DIER, for atomic bit-band access.
 #define DIER_CC1IE_BIT  1
 #define DIER_CC2IE_BIT  2
+#define DIER_CC4IE_BIT  4
 
 TEACUP_HOT
 TEACUP_STEP_RAMFUNC void timer_step_pulse_end(void) {
@@ -94,11 +96,40 @@ TEACUP_STEP_RAMFUNC void timer_step_pulse_end(void) {
   PERIPH_BIT(TIM5->DIER, DIER_CC2IE_BIT) = 1;
 }
 
+#ifdef LINEAR_ADVANCE
+/*
+  "Right away" is a software flag plus a pending interrupt, not an EGR
+  write: CC4G would do on the STM32, but Renode's timer model resets the
+  counter on any EGR write, which delays the next step.
+*/
+TEACUP_HOT
+TEACUP_STEP_RAMFUNC void timer_e_set(uint32_t delay) {
+  uint32_t compare = TIM5->CNT + delay;
+
+  TIM5->CCR4 = compare;
+  TIM5->SR = ~TIM_SR_CC4IF;
+  PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 1;
+  if ((int32_t)(TIM5->CNT - compare) >= 0) {    // Due already.
+    PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
+    la_kicked = 1;
+    NVIC_SetPendingIRQ(TIM5_IRQn);
+  }
+}
+
+TEACUP_HOT
+TEACUP_STEP_RAMFUNC void timer_e_off(void) {
+  PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
+  TIM5->SR = ~TIM_SR_CC4IF;
+}
+#endif
+
 /**
-  Step timer interrupt. Three sources:
+  Step timer interrupt. Four sources:
    - Compare 2: end of the step pulses, lower all step pins.
    - Compare 3: babystep (M290), see core/babystep.c.
    - Compare 1: time for the next step.
+   - Compare 4: E generator of linear advance, see motion/linear_advance.c.
+     It also runs right after a step with a Bresenham E step.
   Pulse end first, in case both are due, then babysteps, which must not
   start while a Z pulse is still high.
 */
@@ -148,6 +179,14 @@ TEACUP_STEP_RAMFUNC void TIM5_IRQHandler(void) {
     if (latency < 0x80000000UL && latency > step_stats.max_latency)
       step_stats.max_latency = latency;
   }
+
+  #ifdef LINEAR_ADVANCE
+    if (la_kicked || ((sr & TIM_SR_CC4IF) && (dier & TIM_DIER_CC4IE))) {
+      PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
+      TIM5->SR = ~TIM_SR_CC4IF;
+      la_isr();
+    }
+  #endif
 
   #ifdef DEBUG_LED_PIN
     WRITE(DEBUG_LED_PIN, 0);
@@ -211,8 +250,20 @@ TEACUP_STEP_RAMFUNC uint8_t timer_set(int32_t delay, uint8_t check_short) {
   in time are counted from now.
 */
 void timer_reset(void) {
+  #ifdef LINEAR_ADVANCE
+    // The E generator may run: keep its schedule and time stamps.
+    ATOMIC_START();
+      uint32_t old = TIM5->CNT;
+
+      TIM5->CNT = 0;
+      TIM5->CCR1 = 0;
+      TIM5->CCR4 -= old;
+      la_rebase(old);
+    ATOMIC_END();
+  #else
   TIM5->CNT = 0;
   TIM5->CCR1 = 0;
+  #endif
   #ifdef BABYSTEPPING
     // A babystep scheduled on the old time base would wait for a full
     // round of the counter.

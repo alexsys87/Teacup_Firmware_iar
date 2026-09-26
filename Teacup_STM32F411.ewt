@@ -3575,6 +3575,9 @@
         <file>
             <name>$PROJ_DIR$\motion\dda_queue.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\motion\linear_advance.c</name>
+        </file>
     </group>
     <group>
         <name>pff</name>
