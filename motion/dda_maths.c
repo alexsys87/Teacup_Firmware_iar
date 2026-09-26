@@ -247,3 +247,11 @@ uint32_t acc_ramp_len(uint32_t feedrate, uint8_t fast_axis) {
   return (feedrate * feedrate) / (acc_ramp_div_P[fast_axis]);
 }
 
+/** Acceleration ramp length in steps per (mm/min)^2 of the fast axis speed.
+ *
+ * acc_ramp_len(f, axis) == f * f * acc_ramp_per_fsq(axis), apart from
+ * rounding. Used by the look-ahead planner, which works with squared speeds.
+ */
+float acc_ramp_per_fsq(uint8_t fast_axis) {
+  return 1.0f / (float)acc_ramp_div_P[fast_axis];
+}

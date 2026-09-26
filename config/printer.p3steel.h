@@ -361,9 +361,12 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define DEFAULT_I_LIMIT          (255L * 1024 / DEFAULT_I) // 3784
 
 /** \def MOVEBUFFER_SIZE
-  Move buffer size, in number of moves.
+  Move buffer size, in number of moves. Look-ahead plans over the whole
+  queue: to reach speed v, it needs v^2 / (2 * ACCELERATION) of moves ahead
+  to stop. 64 moves of 0.35 mm are 22 mm, enough for 200 mm/s at
+  1000 mm/s^2. About 120 bytes of RAM per move.
 */
-#define MOVEBUFFER_SIZE          16
+#define MOVEBUFFER_SIZE          64
 
 /** \def DC_EXTRUDER DC_EXTRUDER_PWM
   DC motor extruder, configured as a heater above.

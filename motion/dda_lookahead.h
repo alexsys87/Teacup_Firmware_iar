@@ -24,7 +24,7 @@
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 
 void dda_find_crossing_speed(DDA *prev, DDA *current);
-void dda_join_moves(DDA *prev, DDA *current);
+void dda_plan(DDA *current);
 
 #endif /* LOOKAHEAD */
 #endif /* DDA_LOOKAHEAD_H_ */

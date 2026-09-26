@@ -138,6 +138,13 @@ typedef struct {
   // These two are based on the "fast" axis, the axis with the most steps.
   uint32_t          start_steps; ///< would be required to reach start feedrate
   uint32_t          end_steps; ///< would be required to stop from end feedrate
+  // Planner state, see dda_plan(). Speeds along the path, squared,
+  // in (mm/min)^2. Used outside of interrupts only.
+  float             n_per_vsq;     ///< ramp steps (fast axis) per (mm/min)^2
+  float             delta_vsq;     ///< speed^2 change possible within the move
+  float             max_entry_vsq; ///< crossF^2, entry speed limit
+  float             entry_vsq;     ///< planned entry speed^2 (= start_steps)
+  float             plan_vsq;      ///< scratch value of the reverse pass
   #endif
   // Number the moves to be able to test at the end of lookahead if the moves
   // are the same. Note: we do not need a lot of granularity here: more than
@@ -154,6 +161,11 @@ typedef struct {
   /// so keep small variables grouped together to reduce the amount of these
   /// gaps. See e.g. NXP application note AN10963, page 10f.
   uint8_t           fast_axis;       ///< number of the fast axis
+  #ifdef LOOKAHEAD
+  /// Planner: the entry speed can't grow any more. Not a bit field, it must
+  /// not share a byte with flags written in the step interrupt.
+  uint8_t           plan_fixed;
+  #endif
 
   /// Endstop homing
   uint8_t endstop_check; ///< Do we need to check endstops? 0x1=Check X, 0x2=Check Y, 0x4=Check Z
@@ -193,6 +205,11 @@ void dda_create(DDA *dda, const TARGET *target);
 
 // start a created DDA (called from timer interrupt)
 void dda_start(DDA *dda);
+
+#ifdef ACCELERATION_RAMPING
+/// Step interval (timer ticks) at ramp position n, not below dda->c_min.
+uint32_t dda_c_for_n(const DDA *dda, uint32_t n);
+#endif
 
 // DDA takes one step (called from timer interrupt)
 void dda_step(DDA *dda);

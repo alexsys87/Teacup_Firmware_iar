@@ -62,6 +62,12 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
   if ( ! prev)
     return;
 
+  // Endstop moves stop on their own, don't join them.
+  if (prev->endstop_check || current->endstop_check) {
+    current->crossF = 0;
+    return;
+  }
+
   // We always look at the smaller of both combined speeds,
   // else we'd interpret intended speed changes as jerk.
   F = prev->endpoint.F;
@@ -136,204 +142,190 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
   return;
 }
 
-/**
- * \brief Join 2 moves by removing the full stop between them, where possible.
- * \details To join the moves, the deceleration ramp of the previous move and
- * the acceleration ramp of the current move are shortened, resulting in a
- * non-zero speed at that point. The target speed at the corner is already to
- * be found in dda->crossF. See dda_find_corner_speed().
- *
- * Ideally, both ramps can be reduced to actually have Fcorner at the corner,
- * but the surrounding movements might no be long enough to achieve this speed.
- * Analysing both moves to find the best result is done here.
- *
- * TODO: to achieve better results with short moves (move distance < both ramps),
- *       this function should be able to enhance the corner speed on repeated
- *       calls when reverse-stepping through the movement queue.
- *
- * \param [in] prev is the DDA structure of the move previous to the current one.
- * \param [in] current is the DDA structure of the move currently created.
- *
- * Premise: the 'current' move is not dispatched in the queue: it should remain
- * constant while this function is running.
- *
- * Note: the planner always makes sure the movement can be stopped within the
- * last move (= 'current'); as a result a lot of small moves will still limit the speed.
- */
-TEACUP_HOT
-void dda_join_moves(DDA *prev, DDA *current) {
+/// Previous slot in the movement queue ring buffer.
+static DDA *mb_prev(DDA *dda) {
+  return (dda == movebuffer) ? &movebuffer[MOVEBUFFER_SIZE - 1] : dda - 1;
+}
 
-  // Calculating the look-ahead settings can take a while; before modifying
-  // the previous move, we need to locally store any values and write them
-  // when we are done (and the previous move is not already active).
-  uint32_t prev_F, prev_F_in_steps, prev_F_start_in_steps, prev_F_end_in_steps;
-  uint32_t prev_rampup, prev_rampdown, prev_total_steps;
-  uint32_t crossF, crossF_in_steps;
-  uint8_t prev_id;
-  // Similarly, we only want to modify the current move if we have the results of the calculations;
-  // until then, we do not want to touch the current move settings.
-  // Note: we assume 'current' will not be dispatched while this function runs, so we do not to
-  // back up the move settings: they will remain constant.
-  uint32_t this_F, this_F_in_steps, this_F_start_in_steps, this_rampup, this_rampdown, this_total_steps, this_fast_axis;
-  uint8_t this_id;
-  #ifdef LOOKAHEAD_DEBUG
-  static uint32_t la_cnt = 0;     // Counter: how many moves did we join?
-  static uint32_t moveno = 0;     // Debug counter to number the moves - helps while debugging
-  moveno++;
+/// Next slot in the movement queue ring buffer.
+static DDA *mb_next(DDA *dda) {
+  return (dda == &movebuffer[MOVEBUFFER_SIZE - 1]) ? movebuffer : dda + 1;
+}
+
+/**
+ * \brief Set the speed at the junction of two moves.
+ *
+ * \param [in] prev is the earlier move.
+ * \param [in] dda is the move following prev.
+ * \param [in] vsq is the speed at the junction, squared, (mm/min)^2.
+ *
+ * \return 1 on success, 0 if prev became live or finished meanwhile. Then
+ *         nothing is written and the junction keeps its speed.
+ *
+ * Exit speed of prev and entry speed of dda are written together with
+ * interrupts locked, so the step interrupt always sees matching speeds at
+ * each junction. As prev isn't live, dda isn't live either.
+ *
+ * The speed along the path is the same on both sides, but speed and
+ * acceleration of the fast axis may differ, so each move gets its own ramp
+ * position.
+ */
+static uint8_t plan_commit(DDA *prev, DDA *dda, float vsq) {
+  uint32_t end_steps, start_steps, c;
+  uint8_t ok = 0;
+
+  end_steps = (uint32_t)(vsq * prev->n_per_vsq);
+  start_steps = (uint32_t)(vsq * dda->n_per_vsq);
+  c = dda_c_for_n(dda, start_steps);
+
+  ATOMIC_START();
+    if ( ! prev->live && ! prev->done) {
+      prev->end_steps = end_steps;
+      dda->start_steps = start_steps;
+      dda->n = (int32_t)start_steps;
+      dda->c = c;
+      ok = 1;
+    }
+  ATOMIC_END();
+
+  if (ok)
+    dda->entry_vsq = vsq;
+
+  #ifdef DEBUG
+    if (ok)
+      lookahead_joined++;
+    else
+      lookahead_timeout++;
   #endif
 
-  // Bail out if there's nothing to join.
-  if ( ! prev || current->crossF == 0)
-    return;
+  return ok;
+}
 
-  // Show the proposed crossing speed - this might get adjusted below.
+/**
+ * \brief Plan the speeds of all queued moves after adding a new one.
+ * \details Full look-ahead over the movement queue: the new move ends with a
+ * full stop, all moves before it get the highest entry and exit speeds which
+ * are reachable within the acceleration limits. Many short moves (arcs,
+ * rounded perimeters) no longer need to be able to stop within each single
+ * move, they share the deceleration distance.
+ *
+ * Speeds are handled along the path, squared, in (mm/min)^2. A move of
+ * length s with acceleration a can change the squared speed by 2 * a * s
+ * (dda->delta_vsq, derived from total_steps). Limits per junction are the
+ * crossing speed (dda->crossF, see dda_find_crossing_speed(), which is also
+ * below the feedrate of both moves).
+ *
+ * 1. Walk back from the new move to the oldest move whose entry speed can
+ *    still change. The previous move is live (entry speed can't change), or
+ *    the entry speed is known to be final (dda->plan_fixed).
+ * 2. Reverse pass, newest to oldest: each move must be able to decelerate to
+ *    the entry speed of the next move, the new move to zero.
+ * 3. Forward pass, oldest to newest: each move must be able to accelerate to
+ *    the entry speed of the next move. The result is written junction by
+ *    junction, see plan_commit().
+ *
+ * A move becoming live meanwhile freezes its junctions. Then planning starts
+ * over, with all junctions written so far being valid. Adding a move never
+ * lowers planned speeds. Between two writes one move has its new entry
+ * speed and its old exit speed; it could run like this only if the move
+ * before it started and finished within these few microseconds.
+ *
+ * An entry speed is final when it equals the crossing speed, or when the
+ * previous move accelerates all the way from a final entry speed. This keeps
+ * the walk back short on long queues.
+ *
+ * This function is expected to be called from within dda_create(), after
+ * dda_find_crossing_speed(). The new move isn't queued yet.
+ *
+ * \param [in] current is the DDA structure of the move currently created.
+ */
+TEACUP_HOT
+void dda_plan(DDA *current) {
+  DDA *first, *prev, *dda;
+  float ratio, next_vsq, vsq, limit;
+  uint8_t i, retries, fixed;
+
+  // The new move isn't queued yet, the step interrupt can't start it.
+  // It ends with a full stop.
+  current->start_steps = 0;
+  current->end_steps = 0;
+  current->n = 0;
+  current->c = dda_c_for_n(current, 0);
+  current->entry_vsq = 0.f;
+  current->plan_fixed = 1;
+
+  // Path speed -> fast axis speed -> ramp steps.
+  ratio = current->distance ?
+          (float)current->fast_um / (float)current->distance : 0.f;
+  current->n_per_vsq = ratio * ratio * acc_ramp_per_fsq(current->fast_axis);
+  if (current->n_per_vsq > 0.f)
+    current->delta_vsq = (float)current->total_steps / current->n_per_vsq;
+  else {
+    current->delta_vsq = 0.f;
+    current->crossF = 0;
+  }
+  current->max_entry_vsq = (float)current->crossF * (float)current->crossF;
+
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-    sersendf_P(("Initial crossing speed: %lu\n"), current->crossF);
+    sersendf_P(("Plan: crossF %lu, %lu steps\n"),
+               current->crossF, current->total_steps);
 
-  // Make sure we have 2 moves and the previous move is not already active
-  if (prev->live == 0) {
-    // Copy DDA ids to verify later that nothing changed during calculations
-    ATOMIC_START();
-      prev_id = prev->id;
-      this_id = current->id;
-    ATOMIC_END();
+  // Not joined with the previous move: nothing to plan.
+  if (current->crossF == 0)
+    return;
+  current->plan_fixed = 0;
 
-    prev_F = prev->endpoint.F;
-    prev_F_start_in_steps = prev->start_steps;
-    prev_total_steps = prev->total_steps;
-    crossF = current->crossF;
-    this_total_steps = current->total_steps;
-    this_fast_axis = current->fast_axis;
+  for (retries = MOVEBUFFER_SIZE; retries; retries--) {
+    // 1. Find the oldest move whose entry speed can still change.
+    first = current;
+    for (i = MOVEBUFFER_SIZE - 1; i; i--) {
+      if (first->plan_fixed)
+        break;
+      prev = mb_prev(first);
+      if (prev->live || prev->done) {
+        // The previous move runs already, its exit speed is final.
+        first->plan_fixed = 1;
+        break;
+      }
+      first = prev;
+    }
 
-    // Here we have to distinguish between feedrate along the movement
-    // direction and feedrate of the fast axis. They can differ by a factor
-    // of 2.
-    // Along direction: F, crossF.
-    // Along fast axis already: start_steps, end_steps.
-    //
-    // All calculations here are done along the fast axis, so recalculate
-    // F and crossF to match this, too.
-    prev_F = muldiv(prev->fast_um, prev_F, prev->distance);
-    this_F = muldiv(current->fast_um, current->endpoint.F, current->distance);
-    crossF = muldiv(current->fast_um, crossF, current->distance);
-
-    prev_F_in_steps = acc_ramp_len(prev_F, this_fast_axis);
-    this_F_in_steps = acc_ramp_len(this_F, this_fast_axis);
-    crossF_in_steps = acc_ramp_len(crossF, this_fast_axis);
-
-    // Show the proposed crossing speed - this might get adjusted below
-    if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-      sersendf_P(("Initial crossing speed: %lu\n"), crossF_in_steps);
-
-    // Compute the maximum speed we can reach for crossing.
-    crossF_in_steps = MIN(crossF_in_steps, this_total_steps);
-    crossF_in_steps = MIN(crossF_in_steps, prev_total_steps + prev_F_start_in_steps);
-
-    if (crossF_in_steps == 0)
+    if (first == current)
       return;
 
-    // Build ramps for previous move.
-    if (crossF_in_steps == prev_F_in_steps) {
-      prev_rampup = prev_F_in_steps - prev_F_start_in_steps;
-      prev_rampdown = 0;
-    }
-    else if (crossF_in_steps < prev_F_start_in_steps) {
-      uint32_t extra, limit;
-
-      prev_rampup = 0;
-      prev_rampdown = prev_F_start_in_steps - crossF_in_steps;
-      extra = (prev_total_steps - prev_rampdown) >> 1;
-      limit = prev_F_in_steps - prev_F_start_in_steps;
-      extra = MIN(extra, limit);
-
-      prev_rampup += extra;
-      prev_rampdown += extra;
-    }
-    else {
-      uint32_t extra, limit;
-
-      prev_rampup = crossF_in_steps - prev_F_start_in_steps;
-      prev_rampdown = 0;
-      extra = (prev_total_steps - prev_rampup) >> 1;
-      limit = prev_F_in_steps - crossF_in_steps;
-      extra = MIN(extra, limit);
-
-      prev_rampup += extra;
-      prev_rampdown += extra;
-    }
-    prev_rampdown = prev_total_steps - prev_rampdown;
-    prev_F_end_in_steps = crossF_in_steps;
-
-    // Build ramps for current move.
-    if (crossF_in_steps == this_F_in_steps) {
-      this_rampup = 0;
-      this_rampdown = crossF_in_steps;
-    }
-    else {
-      this_rampup = 0;
-      this_rampdown = crossF_in_steps;
-
-      uint32_t extra = (this_total_steps - this_rampdown) >> 1;
-      uint32_t limit = this_F_in_steps - crossF_in_steps;
-      extra = MIN(extra, limit);
-
-      this_rampup += extra;
-      this_rampdown += extra;
-    }
-    this_rampdown = this_total_steps - this_rampdown;
-    this_F_start_in_steps = crossF_in_steps;
-
-    if (DEBUG_DDA && (debug_flags & DEBUG_DDA)) {
-      sersendf_P(("prev_F_start: %lu\n"), prev_F_start_in_steps);
-      sersendf_P(("prev_F: %lu\n"), prev_F_in_steps);
-      sersendf_P(("prev_rampup: %lu\n"), prev_rampup);
-      sersendf_P(("prev_rampdown: %lu\n"),
-                 prev_total_steps - prev_rampdown);
-      sersendf_P(("crossF: %lu\n"), crossF_in_steps);
-      sersendf_P(("this_rampup: %lu\n"), this_rampup);
-      sersendf_P(("this_rampdown: %lu\n"),
-                 this_total_steps - this_rampdown);
-      sersendf_P(("this_F: %lu\n"), this_F_in_steps);
+    // 2. Reverse pass.
+    next_vsq = 0.f;
+    for (dda = current; dda != first; dda = mb_prev(dda)) {
+      vsq = next_vsq + dda->delta_vsq;
+      if (vsq > dda->max_entry_vsq)
+        vsq = dda->max_entry_vsq;
+      dda->plan_vsq = vsq;
+      next_vsq = vsq;
     }
 
-    #ifdef DEBUG
-      uint8_t timeout = 0;
-    #endif
-
-    ATOMIC_START();
-      // Evaluation: determine how we did...
-      #ifdef DEBUG
-        lookahead_joined++;
-      #endif
-
-      // Determine if we are fast enough - if not, just leave the moves
-      // Note: to test if the previous move was already executed and replaced by a new
-      // move, we compare the DDA id.
-      if(prev->live == 0 && prev->id == prev_id && current->live == 0 && current->id == this_id) {
-        prev->end_steps = prev_F_end_in_steps;
-        prev->rampup_steps = prev_rampup;
-        prev->rampdown_steps = prev_rampdown;
-        current->rampup_steps = this_rampup;
-        current->rampdown_steps = this_rampdown;
-        current->end_steps = 0;
-        current->start_steps = this_F_start_in_steps;
-        #ifdef LOOKAHEAD_DEBUG
-          la_cnt++;
-        #endif
+    // 3. Forward pass and writing the results.
+    prev = first;
+    for (;;) {
+      dda = mb_next(prev);
+      vsq = dda->plan_vsq;
+      limit = prev->entry_vsq + prev->delta_vsq;
+      if (vsq >= limit) {
+        vsq = limit;
+        fixed = prev->plan_fixed;
       }
-      #ifdef DEBUG
-        else
-          timeout = 1;
-      #endif
-    ATOMIC_END();
+      else
+        fixed = 0;
+      if (vsq >= dda->max_entry_vsq)
+        fixed = 1;
 
-    // If we were not fast enough, any feedback will happen outside the atomic block:
-    #ifdef DEBUG
-      if (timeout) {
-        sersendf_P(("// Notice: look ahead not fast enough\n"));
-        lookahead_timeout++;
-      }
-    #endif
+      if (vsq != dda->entry_vsq && ! plan_commit(prev, dda, vsq))
+        break;                            // prev became live, start over.
+      dda->plan_fixed = fixed;
+
+      if (dda == current)
+        return;
+      prev = dda;
+    }
   }
 }
 
