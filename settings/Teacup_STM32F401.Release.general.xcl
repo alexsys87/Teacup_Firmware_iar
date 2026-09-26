@@ -1,0 +1,11 @@
+C:\iar\ewarm-9.70.1\arm\bin\armproc.dll
+
+ C:\iar\ewarm-9.70.1\arm\bin\armsim2.dll
+
+ D:\Teacup_Firmware_iar\STM32F4\Release\Exe\Teacup_STM32F401.out
+
+ --plugin=C:\iar\ewarm-9.70.1\arm\bin\armLibSupportUniversal.dll
+
+ 
+
+

@@ -1,0 +1,15 @@
+mach create "teacup"
+machine LoadPlatformDescription @stm32f401.repl
+sysbus LoadELF @../gcc/build_F401_1/teacup.elf
+showAnalyzer sysbus.usart2 Antmicro.Renode.Analyzers.LoggingUartAnalyzer
+logLevel 3
+logLevel -1 sysbus.usart2
+emulation RunFor "0.5"
+sysbus.usart2 WriteChar 0x4D
+sysbus.usart2 WriteChar 0x31
+sysbus.usart2 WriteChar 0x31
+sysbus.usart2 WriteChar 0x35
+sysbus.usart2 WriteChar 0x0A
+emulation RunFor "0.2"
+cpu PC
+quit

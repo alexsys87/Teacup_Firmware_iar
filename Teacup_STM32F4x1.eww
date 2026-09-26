@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workspace>
+    <project>
+        <path>$WS_DIR$\Teacup_STM32F401.ewp</path>
+    </project>
+    <project>
+        <path>$WS_DIR$\Teacup_STM32F411.ewp</path>
+    </project>
+    <batchBuild />
+</workspace>
