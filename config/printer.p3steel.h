@@ -83,18 +83,22 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define ACCELERATION_RAMPING
 //#define ACCELERATION_TEMPORAL
 
-/** \def ACCELERATION
-  Acceleration for ACCELERATION_RAMPING and homing, mm/s^2.
+/** \def ACCELERATION ACCELERATION_RETRACT ACCELERATION_TRAVEL
+  Acceleration along the path for ACCELERATION_RAMPING, mm/s^2, like
+  Marlin's M204: printing moves (with E, M204 P), retracts and primes
+  (E only, M204 R), travel and homing (no E, M204 T).
   Marlin: max. 1000 X/Y, 50 Z, 10000 E; printing acceleration 50 (far too
-  low). ACCELERATION corresponds to Marlin's printing acceleration (M204),
-  the per axis limits follow below (M201).
+  low). The per axis limits follow below (M201).
 */
 #define ACCELERATION             1000
+#define ACCELERATION_RETRACT     5000
+#define ACCELERATION_TRAVEL      1000
 
 /** \def MAX_ACCELERATION_X MAX_ACCELERATION_Y MAX_ACCELERATION_Z MAX_ACCELERATION_E
-  Max. acceleration per axis (Marlin MAX_ACCELERATION), mm/s^2. A move
-  accelerates with the lower of ACCELERATION and the value of its fastest
-  axis, e.g. Z-only moves with 50 mm/s^2. Changeable with M201.
+  Max. acceleration per axis (Marlin MAX_ACCELERATION), mm/s^2. Each axis
+  gets its share of the acceleration along the path; where this exceeds
+  its limit, the move accelerates slower, e.g. Z-only moves with
+  50 mm/s^2. Changeable with M201.
 */
 #define MAX_ACCELERATION_X       1000
 #define MAX_ACCELERATION_Y       1000

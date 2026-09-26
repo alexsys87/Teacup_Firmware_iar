@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Renode test of the look-ahead planner on the P3 Steel build
-(make CHIP=F401 TEST=0): many short moves must run at the programmed
-feedrate, without slowing down at each junction.
+"""Renode test of the look-ahead planner and the accelerations on the P3
+Steel build (make CHIP=F401 TEST=0): many short moves must run at the
+programmed feedrate, without slowing down at each junction; retracts use
+M204 R, diagonals accelerate like axis-aligned moves.
 
 With look-ahead over two moves only, each move had to be able to stop
 within itself: 0.35 mm at 1000 mm/s^2 gave at most ~26 mm/s, arc segments
@@ -19,6 +20,10 @@ Checks, for a G2 circle (r 5 mm, segments of ~0.63 mm) and a polygon of
   - cruise speed reached, not exceeded, no speed dips between moves
   - acceleration between moves within the limit
   - M114 = end point
+and for single moves:
+  - a 3 mm retract (E only) accelerates with ACCELERATION_RETRACT
+  - a 20 mm move at 45 degrees takes as long as a 20 mm move along X: the
+    acceleration applies along the path, not to the fast axis
 """
 import math, os, re, subprocess, sys
 
@@ -32,9 +37,11 @@ PACE = float(os.environ.get('LOOKAHEAD_PACE', '0.002'))
 F = 6000                                  # mm/min
 V = F / 60.0                              # mm/s
 ACC = 1000.0                              # mm/s^2, ACCELERATION
-# Ramps are based on the fast axis, along the path acceleration is up to
-# sqrt(2) higher on diagonals. Plus some margin for averaging over moves.
-ACC_MAX = ACC * math.sqrt(2) * 1.1
+ACC_RETRACT = 5000.0                      # mm/s^2, ACCELERATION_RETRACT
+# Acceleration applies along the path. Margin for averaging over moves:
+# the speed is updated once per millisecond only. With the acceleration on
+# the fast axis (before), diagonals gave ~1440 mm/s^2 here.
+ACC_MAX = ACC * 1.2
 
 _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).stdout
 def sym(name):
@@ -90,6 +97,19 @@ for k in range(1, N_POLY + 1):
     send('G1 X%.3f Y%.3f\n' % (cx + r_poly * math.cos(a), cy + r_poly * math.sin(a)))
     run(str(PACE))
 finish(5.04)
+
+# 3. Retract, E only, at the E feedrate limit (25 mm/s).
+L_RETRACT, F_RETRACT = 3.0, 1500
+send('G1 E-%.1f F%d\n' % (L_RETRACT, F_RETRACT))
+finish(5.06)
+
+# 4. 20 mm at 45 degrees, then 20 mm along X.
+L_LINE = 20.0
+D45 = L_LINE / math.sqrt(2)
+send('G1 X%.3f Y%.3f F%d\n' % (100 + D45, 100 + D45, F))
+finish(5.08)
+send('G1 X%.3f F%d\n' % (100 + D45 - L_LINE, F))
+finish(5.10)
 cmd('quit')
 
 script = '/tmp/lookahead_test_%d.resc' % os.getpid()
@@ -118,11 +138,11 @@ def check(name, cond, info=''):
     print('%s  %-52s %s' % ('PASS' if cond else 'FAIL', name, info if not cond else ''))
     if not cond: fails += 1
 
-def ideal_time(length):
-    """One acceleration to V, cruise, one deceleration."""
-    if length >= V * V / ACC:
-        return length / V + V / ACC
-    return 2 * math.sqrt(length / ACC)
+def ideal_time(length, v=V, acc=ACC):
+    """One acceleration to v, cruise, one deceleration."""
+    if length >= v * v / acc:
+        return length / v + v / acc
+    return 2 * math.sqrt(length / acc)
 
 def analyse(name, times, seg_len, length, slack):
     """times: move starts plus the start of the end marker."""
@@ -151,8 +171,8 @@ def analyse(name, times, seg_len, length, slack):
 
 u = [l for l in uart if l.startswith('ok')]
 check('move queue: 63 free slots (ADVANCED_OK)', any(l.startswith('ok P63') for l in u), u[:3])
-check('two groups of moves', len(groups) == 2, [len(g) for g in groups])
-if len(groups) == 2:
+check('five groups of moves', len(groups) == 5, [len(g) for g in groups])
+if len(groups) == 5:
     n_arc = len(groups[0]) - 1
     seg_arc = 2 * R_ARC * math.sin(math.pi / n_arc)
     analyse('G2 circle r 5', groups[0], seg_arc, n_arc * seg_arc, (1.15, 0.02))
@@ -160,12 +180,39 @@ if len(groups) == 2:
     # The first move starts right away and has to stop, the next ones
     # can't join it while it runs.
     analyse('G1 polygon 0.35 mm', groups[1], SEG, N_POLY * SEG, (1.15, 0.06))
+
+    # Single moves: one start plus the end marker. Step timing adds ~1 %.
+    t_ret = groups[2][-1] - groups[2][0]
+    v_ret = F_RETRACT / 60.0
+    ideal_r = ideal_time(L_RETRACT, v_ret, ACC_RETRACT)
+    ideal_r_old = ideal_time(L_RETRACT, v_ret, ACC)
+    print('--- retract %.1f mm at %.0f mm/s: %.4f s (%.4f s at %.0f mm/s^2, %.4f s at %.0f)'
+          % (L_RETRACT, v_ret, t_ret, ideal_r, ACC_RETRACT, ideal_r_old, ACC))
+    check('retract: single move', len(groups[2]) == 2, len(groups[2]))
+    check('retract: accelerates with M204 R (%.0f mm/s^2)' % ACC_RETRACT,
+          ideal_r * 0.99 <= t_ret <= ideal_r * 1.03 + 0.002, '%.4f s' % t_ret)
+
+    t_diag = groups[3][-1] - groups[3][0]
+    t_axis = groups[4][-1] - groups[4][0]
+    ideal_l = ideal_time(L_LINE)
+    print('--- 20 mm: diagonal %.4f s, along X %.4f s, ideal %.4f s '
+          '(%.4f s with sqrt(2) on the diagonal)'
+          % (t_diag, t_axis, ideal_l, ideal_time(L_LINE, V, ACC * math.sqrt(2))))
+    check('along X: ideal time', ideal_l * 0.99 <= t_axis <= ideal_l * 1.03,
+          '%.4f s' % t_axis)
+    check('diagonal: same time as along X (+-1.5 %)',
+          abs(t_diag - t_axis) <= 0.015 * t_axis, '%.4f s' % t_diag)
 check('M114 after the circle', len(positions) >= 1 and
       max(abs(a - b) for a, b in zip(positions[0][:3], (100, 100, 5.02))) < 0.01,
       positions[:1])
 check('M114 after the polygon', len(positions) >= 2 and
       max(abs(a - b) for a, b in zip(positions[1][:3], (100, 100, 5.04))) < 0.01,
       positions[1:2])
+check('M114 after the retract', len(positions) >= 3 and
+      abs(positions[2][3] + L_RETRACT) < 0.01, positions[2:3])
+check('M114 after the lines', len(positions) >= 5 and
+      max(abs(a - b) for a, b in zip(positions[4][:3],
+          (100 + D45 - L_LINE, 100 + D45, 5.10))) < 0.01, positions[4:5])
 
 print('\n%d failure(s)' % fails)
 sys.exit(1 if fails else 0)

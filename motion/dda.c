@@ -56,15 +56,6 @@ MOVE_STATE move_state;
 /// Maximum allowed feedrate on each axis: settings.max_feedrate (M203).
 #define maximum_feedrate_P settings.max_feedrate
 
-#ifdef ACCELERATION_RAMPING
-/// \var c0_P
-/// \brief Initialization constant for the ramping algorithm. Timer cycles for
-///        first step interval.
-///        Calculated in dda_init(), sqrt() isn't a constant expression in C.
-static axes_uint32_t c0_P;
-#endif
-
-
 /*! Set the direction of the 'n' axis
 */
 static void set_direction(DDA *dda, enum axis_e n, int32_t delta) {
@@ -96,8 +87,8 @@ int8_t get_direction(DDA *dda, enum axis_e n) {
 /**
   Step interval at ramp position n, n steps from standstill on the fast axis.
 
-  \param dda the move, needs fast_axis and c_min.
-  \param n   ramp position, see acc_ramp_len().
+  \param dda the move, needs c0 and c_min.
+  \param n   ramp position, steps of the fast axis from standstill.
 
   \return Timer ticks between two steps, not below dda->c_min.
 */
@@ -106,7 +97,7 @@ uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
   uint32_t c;
 
   if (n == 0)
-    c = (c0_P[dda->fast_axis]);
+    c = dda->c0;
   else
     // Explicit formula: c0 * (sqrt(n + 1) - sqrt(n)),
     // approximation here: c0 * (1 / (2 * sqrt(n))).
@@ -115,10 +106,10 @@ uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
     // Exact square root, not rounded to an integer: with look-ahead moves
     // run near the top of their ramps, where n is a few hundred only and
     // one unit of sqrt(n) would be a speed step of 5 %.
-    c = (uint32_t)((float)(c0_P[dda->fast_axis]) /
+    c = (uint32_t)((float)dda->c0 /
                    (2.0f * teacup_sqrtf((float)n)));
     #else
-    c = ((c0_P[dda->fast_axis]) * int_inv_sqrt(n)) >> 13;
+    c = (dda->c0 * int_inv_sqrt(n)) >> 13;
     #endif
 
   if (c < dda->c_min)
@@ -128,18 +119,44 @@ uint32_t dda_c_for_n(const DDA *dda, uint32_t n) {
 }
 #endif /* ACCELERATION_RAMPING */
 
-/*! Inititalise DDA movement structures
-*/
-void dda_update_settings(void) {
-  #ifdef ACCELERATION_RAMPING
-    enum axis_e i;
+#ifdef ACCELERATION_RAMPING
+/**
+  Acceleration of a move along its path, mm/s^2.
 
-    for (i = X; i < AXIS_COUNT; i++)
-      c0_P[i] = (uint32_t)((double)F_CPU /
-                sqrt((double)settings.steps_per_m[i] *
-                     (double)settings_axis_accel(i) / 2000.));
-  #endif
+  \param dda      the move, needs delta[].
+  \param delta_um distance of each axis, um.
+  \param distance length of the path, um.
+
+  M204 R for retracts and primes (E only), M204 T for travel (no E),
+  M204 P for printing, like Marlin. Each axis gets its share of the
+  acceleration along the path, delta_um[i] / distance; where this exceeds
+  the M201 limit of that axis, the acceleration is reduced. So a diagonal
+  accelerates with the M204 value, not with the value of its fast axis
+  times sqrt(2).
+*/
+static float move_acceleration(const DDA *dda, const axes_uint32_t delta_um,
+                               uint32_t distance) {
+  float acc, limit;
+  enum axis_e i;
+
+  if (dda->delta[X] == 0 && dda->delta[Y] == 0 && dda->delta[Z] == 0)
+    acc = (float)settings.accel_retract;
+  else if (dda->delta[E] == 0)
+    acc = (float)settings.accel_travel;
+  else
+    acc = (float)settings.acceleration;
+
+  for (i = X; i < AXIS_COUNT; i++) {
+    if (delta_um[i] == 0)
+      continue;
+    limit = (float)settings.max_accel[i] * (float)distance / (float)delta_um[i];
+    if (limit < acc)
+      acc = limit;
+  }
+
+  return (acc < 1.f) ? 1.f : acc;
 }
+#endif /* ACCELERATION_RAMPING */
 
 void dda_init(void) {
 
@@ -470,14 +487,39 @@ void dda_create(DDA *dda, const TARGET *target) {
       if (dda->endpoint.F > 65535)
         dda->endpoint.F = 65535;
 
-      // Acceleration ramps are based on the fast axis, not the combined speed.
-      dda->rampup_steps =
-        acc_ramp_len(muldiv(dda->fast_um, dda->endpoint.F, distance),
-                    dda->fast_axis);
+      {
+        /**
+          Ramps count steps of the fast axis. Its acceleration is its share
+          of the acceleration along the path. Ramp position n (steps from
+          standstill) of fast axis speed v (mm/min) is v^2 / ramp_div,
+          s = v^2 / (2 * a); 7200000 = 60 * 60 * 1000 * 2 (mm/min -> mm/s,
+          steps/m -> steps/mm, factor 2).
+        */
+        float ratio = distance ? (float)dda->fast_um / (float)distance : 1.f;
+        float acc_fast = move_acceleration(dda, delta_um, distance) * ratio;
+        float spm = (float)settings.steps_per_m[dda->fast_axis];
+        float ramp_div, ramp, fast_f;
 
-      if (dda->rampup_steps > dda->total_steps / 2)
-        dda->rampup_steps = dda->total_steps / 2;
-      dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
+        if (acc_fast < 1.f)
+          acc_fast = 1.f;
+        ramp_div = 7200000.f * acc_fast / spm;
+        // Step interval from standstill, c0 = F_CPU * sqrt(2 / a) in steps.
+        dda->c0 = (uint32_t)((float)F_CPU /
+                             teacup_sqrtf(spm * acc_fast / 2000.f));
+
+        fast_f = (float)dda->endpoint.F * ratio;
+        ramp = fast_f * fast_f / ramp_div;
+        if (ramp < (float)(dda->total_steps / 2))
+          dda->rampup_steps = (uint32_t)ramp;
+        else
+          dda->rampup_steps = dda->total_steps / 2;
+        dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
+
+        #ifdef LOOKAHEAD
+          // Path speed^2 -> ramp position, for the planner.
+          dda->n_per_vsq = ratio * ratio / ramp_div;
+        #endif
+      }
 
       #ifdef LOOKAHEAD
         dda->distance = distance;
@@ -487,7 +529,7 @@ void dda_create(DDA *dda, const TARGET *target) {
         dda_plan(dda);
       #else
         dda->n = 0;
-        dda->c = (c0_P[dda->fast_axis]);
+        dda->c = dda->c0;
       #endif
 
     #elif defined ACCELERATION_TEMPORAL
@@ -999,17 +1041,15 @@ void dda_clock(void) {
     }
     if (recalc_speed) {
       if (move_n == 0)
-        move_c = (c0_P[dda->fast_axis]);
+        move_c = dda->c0;
       else
         // Explicit formula: c0 * (sqrt(n + 1) - sqrt(n)),
         // approximation here: c0 * (1 / (2 * sqrt(n))).
         // This >> 13 looks odd, but is verified with the explicit formula.
         #if __FPU_PRESENT
-        move_c = ((c0_P[dda->fast_axis]) /
-                  (2 * int_f_sqrt(move_n)));
+        move_c = (dda->c0 / (2 * int_f_sqrt(move_n)));
         #else
-        move_c = ((c0_P[dda->fast_axis]) *
-                  int_inv_sqrt(move_n)) >> 13;
+        move_c = (dda->c0 * int_inv_sqrt(move_n)) >> 13;
         #endif
 
       if (move_c < dda->c_min) {

@@ -206,52 +206,17 @@ uint8_t msbloc (uint32_t v) {
 }
 
 /*!
-  Pre-calculated constant values for acceleration ramp calculations.
-*/
-static axes_uint32_t acc_ramp_div_P;
-
-/**
-  Recalculate the per axis constants from the runtime settings (M92, M201,
-  M204). Called by settings_apply().
+  Recalculate the per axis constants from the runtime settings (M92).
+  Called by settings_apply().
 */
 void dda_maths_update(void) {
   enum axis_e i;
 
   for (i = X; i < AXIS_COUNT; i++) {
     uint32_t spm = settings.steps_per_m[i];
-    uint32_t div;
 
     axis_qn_P[i] = spm / UM_PER_METER;
     axis_qr_P[i] = spm % UM_PER_METER;
     steps_per_m_P[i] = spm;
-    // s = v^2 / (2 * a), see acc_ramp_len().
-    div = (uint32_t)((7200000.0f * (float)settings_axis_accel(i)) / (float)spm);
-    acc_ramp_div_P[i] = div ? div : 1;
   }
-}
-
-/*! Acceleration ramp length in steps.
- * \param feedrate Target feedrate of the accelerateion.
- * \param fast_axis Number of the fastest axis.
- * \return Accelerating steps neccessary to achieve target feedrate.
- *
- * s = 1/2 * a * t^2, v = a * t ==> s = v^2 / (2 * a)
- * 7200000 = 60 * 60 * 1000 * 2 (mm/min -> mm/s, steps/m -> steps/mm, factor 2)
- *
- * Note: this function has shown to be accurate between 10 and 10'000 mm/s2 and
- *       2000 to 4096000 steps/m (and higher). The numbers are a few percent
- *       too high at very low acceleration. Test code see commit message.
- */
-TEACUP_HOT
-uint32_t acc_ramp_len(uint32_t feedrate, uint8_t fast_axis) {
-  return (feedrate * feedrate) / (acc_ramp_div_P[fast_axis]);
-}
-
-/** Acceleration ramp length in steps per (mm/min)^2 of the fast axis speed.
- *
- * acc_ramp_len(f, axis) == f * f * acc_ramp_per_fsq(axis), apart from
- * rounding. Used by the look-ahead planner, which works with squared speeds.
- */
-float acc_ramp_per_fsq(uint8_t fast_axis) {
-  return 1.0f / (float)acc_ramp_div_P[fast_axis];
 }

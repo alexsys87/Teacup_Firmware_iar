@@ -74,6 +74,7 @@ typedef struct {
 	TARGET						target;		///< target position: X, Y, Z, E and F
 
 	uint8_t						T;				///< T word (tool index)
+  int32_t           T_value;    ///< T word as a number (M204 travel acceleration)
 
 	uint8_t						checksum_read;				///< checksum in gcode command
 	uint8_t						checksum_calculated;	///< checksum we calculated

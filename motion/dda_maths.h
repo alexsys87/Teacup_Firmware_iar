@@ -53,14 +53,7 @@ uint16_t int_inv_sqrt(uint16_t a);
 // 2 ^ msbloc(v) >= v
 uint8_t msbloc (uint32_t v);
 
-// Calculates acceleration ramp length in steps.
 /// Recalculate constants from the runtime settings.
 void dda_maths_update(void);
-
-uint32_t acc_ramp_len(uint32_t feedrate, uint8_t fast_axis);
-
-/// Acceleration ramp length in steps per (mm/min)^2 of the fast axis speed,
-/// floating point version of acc_ramp_len().
-float acc_ramp_per_fsq(uint8_t fast_axis);
 
 #endif	/* _DDA_MATHS_H */

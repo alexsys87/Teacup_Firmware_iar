@@ -211,7 +211,8 @@ static uint8_t plan_commit(DDA *prev, DDA *dda, float vsq) {
  *
  * Speeds are handled along the path, squared, in (mm/min)^2. A move of
  * length s with acceleration a can change the squared speed by 2 * a * s
- * (dda->delta_vsq, derived from total_steps). Limits per junction are the
+ * (dda->delta_vsq, derived from total_steps). Each move has its own
+ * acceleration (M204 P/R/T, M201), see dda_create(). Limits per junction are the
  * crossing speed (dda->crossF, see dda_find_crossing_speed(), which is also
  * below the feedrate of both moves).
  *
@@ -242,7 +243,7 @@ static uint8_t plan_commit(DDA *prev, DDA *dda, float vsq) {
 TEACUP_HOT
 void dda_plan(DDA *current) {
   DDA *first, *prev, *dda;
-  float ratio, next_vsq, vsq, limit;
+  float next_vsq, vsq, limit;
   uint8_t i, retries, fixed;
 
   // The new move isn't queued yet, the step interrupt can't start it.
@@ -254,10 +255,7 @@ void dda_plan(DDA *current) {
   current->entry_vsq = 0.f;
   current->plan_fixed = 1;
 
-  // Path speed -> fast axis speed -> ramp steps.
-  ratio = current->distance ?
-          (float)current->fast_um / (float)current->distance : 0.f;
-  current->n_per_vsq = ratio * ratio * acc_ramp_per_fsq(current->fast_axis);
+  // current->n_per_vsq is set by dda_create().
   if (current->n_per_vsq > 0.f)
     current->delta_vsq = (float)current->total_steps / current->n_per_vsq;
   else {
