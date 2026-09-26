@@ -25,6 +25,9 @@ uint8_t gcode_queue_execute(void);
 /// Number of free command slots.
 uint8_t gcode_queue_free(void);
 
+/// No line queued, none executing, not paused for the user.
+uint8_t gcode_queue_idle(void);
+
 /**
   Host keepalive, called every second: while a command takes long, send
   "echo:busy: processing" every keepalive interval.

@@ -56,6 +56,22 @@ typedef struct {
 
   Parts of this struct are initialised only once per reboot, so make sure dda_step() leaves them with a value compatible to begin a new movement at the end of the movement. Other parts are filled in by dda_start().
 */
+#ifdef POWER_LOSS_RECOVERY
+/**
+  A line of a file print: where it starts in the file, the G-code position
+  and feedrate before it. Printing it again from there gives the same
+  moves. file_pos 0xFFFFFFFF: not from a file.
+*/
+typedef struct {
+  uint32_t      file_pos;
+  axes_int32_t  pos;
+  uint32_t      F;
+} plr_line_t;
+
+/// The file line being executed now, copied into each move it creates.
+extern plr_line_t plr_line;
+#endif
+
 typedef struct {
   // bresenham counters
   axes_int32_t      counter;    ///< counter for total_steps vs each axis
@@ -176,6 +192,12 @@ typedef struct {
   /// Endstop homing
   uint8_t endstop_check; ///< Do we need to check endstops? 0x1=Check X, 0x2=Check Y, 0x4=Check Z
   uint8_t endstop_stop_cond; ///< Endstop condition on which to stop motion: 0=Stop on detrigger, 1=Stop on trigger
+
+  #ifdef POWER_LOSS_RECOVERY
+  /// The file line which created this move (SD / flash print), for
+  /// core/power_loss.c.
+  plr_line_t        plr;
+  #endif
 } DDA;
 
 /*

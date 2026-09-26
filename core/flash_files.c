@@ -10,6 +10,7 @@
     0x0000  4 kB  settings (M500), see flash_store.c
     0x1000  4 kB  directory, 128 entries of 32 bytes
     0x2000  ...   file data, each file starts at a 4 kB sector
+    end - 8 kB    power loss records (POWER_LOSS_RECOVERY), power_loss.c
 
   Directory entry: magic, start, size, flags, name (16). Entries are
   appended; size stays 0xFFFFFFFF until the upload is complete (M29), flags
@@ -31,6 +32,7 @@
 #include "serial.h"
 #include "sermsg.h"
 #include "gcode_parse.h"
+#include "power_loss.h"
 
 #define DIR_ADDR      0x1000UL
 #define DATA_ADDR     0x2000UL
@@ -51,6 +53,7 @@ typedef struct {
 // File being read (M23/M24).
 static uint32_t rd_start, rd_size, rd_pos;
 static uint8_t rd_open;
+static char rd_name[17];
 
 // File being written (M28/M29).
 static uint8_t wr_active;
@@ -58,6 +61,15 @@ static int16_t wr_entry;
 static uint32_t wr_start, wr_pos;
 static uint8_t wr_page[SPI_FLASH_PAGE];
 static uint16_t wr_fill;
+
+/// End of the file area: the power loss records sit behind it.
+static uint32_t files_end(void) {
+  #ifdef POWER_LOSS_RECOVERY
+    return spi_flash_size() - PLR_FLASH_SIZE;
+  #else
+    return spi_flash_size();
+  #endif
+}
 
 static void read_entry(uint16_t i, dir_entry_t *e) {
   spi_flash_read(DIR_ADDR + (uint32_t)i * sizeof(dir_entry_t), e, sizeof(*e));
@@ -88,7 +100,7 @@ static uint32_t data_end(void) {
 
       for (;;) {
         spi_flash_read(a, &w, 4);
-        if (w == ERASED || a + SPI_FLASH_PAGE >= spi_flash_size())
+        if (w == ERASED || a + SPI_FLASH_PAGE >= files_end())
           break;
         a += SPI_FLASH_PAGE;
       }
@@ -202,6 +214,7 @@ void sd_open(const char *filename) {
   dir_entry_t e;
 
   rd_open = 0;
+  rd_name[0] = '\0';
   if ( ! spi_flash_present() || (i = find_file(filename)) < 0) {
     serial_writestr("echo:open failed, File: ");
     serial_writestr(filename);
@@ -213,6 +226,8 @@ void sd_open(const char *filename) {
   rd_size = e.size;
   rd_pos = 0;
   rd_open = 1;
+  memcpy(rd_name, e.name, sizeof(e.name));
+  rd_name[sizeof(e.name)] = '\0';
   serial_writestr("File opened: ");
   serial_writestr(filename);
   serial_writestr(" Size: ");
@@ -264,6 +279,14 @@ uint8_t sd_seek(uint32_t position) {
   return 1;
 }
 
+uint32_t sd_position(void) {
+  return rd_pos;
+}
+
+const char *sd_file_name(void) {
+  return rd_name;
+}
+
 /* ---- Writing ---- */
 
 uint8_t sd_writing(void) {
@@ -276,7 +299,7 @@ static uint8_t flush_page(void) {
 
   if (wr_fill == 0)
     return 1;
-  if (addr + wr_fill > spi_flash_size())
+  if (addr + wr_fill > files_end())
     return 0;
   spi_flash_program(addr, wr_page, wr_fill);
   wr_fill = 0;
@@ -303,13 +326,13 @@ void sd_start_write(const char *filename) {
 
   e = free_entry();
   start = data_end();
-  if ((e < 0 || start + SPI_FLASH_SECTOR > spi_flash_size()) && ! any_valid()) {
+  if ((e < 0 || start + SPI_FLASH_SECTOR > files_end()) && ! any_valid()) {
     // Only deleted files left: start over.
     spi_flash_erase_sector(DIR_ADDR);
     e = 0;
     start = DATA_ADDR;
   }
-  if (e < 0 || start + SPI_FLASH_SECTOR > spi_flash_size()) {
+  if (e < 0 || start + SPI_FLASH_SECTOR > files_end()) {
     serial_writestr("echo:Flash full, delete files (M30, M9002)\n");
     return;
   }
@@ -343,7 +366,7 @@ void sd_write_line(const char *line) {
 
     // Entering a new sector: erase it (programming works on erased cells).
     if ((wr_pos & (SPI_FLASH_SECTOR - 1)) == 0) {
-      if ( ! flush_page() || wr_pos + SPI_FLASH_SECTOR > spi_flash_size()) {
+      if ( ! flush_page() || wr_pos + SPI_FLASH_SECTOR > files_end()) {
         serial_writestr("echo:Flash full, upload aborted\n");
         wr_active = 0;
         return;

@@ -30,6 +30,9 @@ typedef struct {
   int32_t       retract_zlift;  ///< M207 Z, um.
   int32_t       recover_extra;  ///< M208 S, extra prime after G11, um.
   uint32_t      recover_feedrate; ///< M208 F, mm/min.
+  uint32_t      host_timeout;   ///< M86 S, host lost after s, 0 = off.
+  uint32_t      host_lost_temp; ///< M86 E, hotend then, C.
+  uint32_t      plr_enabled;    ///< M413 S, power loss recovery on.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.

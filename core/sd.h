@@ -42,6 +42,12 @@ void sd_report_status(void);
 /// Set the read position in the open file (M26). \return 1 on success.
 uint8_t sd_seek(uint32_t position);
 
+/// Read position in the open file: start of the next line, bytes.
+uint32_t sd_position(void);
+
+/// Name of the file opened last (M23), "" if none.
+const char *sd_file_name(void);
+
 #ifdef SD_FLASH
   /// Upload in progress (M28 until M29).
   uint8_t sd_writing(void);

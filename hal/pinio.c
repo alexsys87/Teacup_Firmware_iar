@@ -21,6 +21,10 @@
 */
 
 #include "pinio.h"
+
+#ifdef Z_STEPPER_ALIGN
+  volatile uint8_t z_step_mask = 3;
+#endif
 #include "delay.h"
 #include "home.h"
 
@@ -72,8 +76,10 @@ void pinio_init(void) {
     WRITE(Z_STEP_PIN, 0); SET_OUTPUT(Z_STEP_PIN);
     WRITE(Z_DIR_PIN, 0);  SET_OUTPUT(Z_DIR_PIN);
   #endif
-  #if defined Z2_STEP_PIN && defined Z2_DIR_PIN
+  #if defined Z2_STEP_PIN
     WRITE(Z2_STEP_PIN, 0); SET_OUTPUT(Z2_STEP_PIN);
+  #endif
+  #if defined Z2_STEP_PIN && defined Z2_DIR_PIN
     WRITE(Z2_DIR_PIN, 0);  SET_OUTPUT(Z2_DIR_PIN);
   #endif
   #ifdef Z_MIN_PIN

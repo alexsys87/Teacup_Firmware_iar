@@ -33,6 +33,8 @@
 #include "settings.h"
 #include "bed_leveling.h"
 #include "delay.h"
+#include <stdlib.h>
+#include <math.h>
 
 #define BLTOUCH_DEPLOY      10
 #define BLTOUCH_STOW        90
@@ -295,6 +297,94 @@ uint8_t probe_single(int32_t px, int32_t py, int32_t *bed_z) {
     sersendf_P(("Bed X: %lq Y: %lq Z: %lq\n"), px, py, *bed_z);
   return ok;
 }
+
+#ifdef Z_STEPPER_ALIGN
+/**
+  Move Z (mask 1) or Z2 (mask 2) alone up by 'um'. The logical Z stays,
+  G34 homes Z again afterwards.
+*/
+static void z_single_up(uint8_t mask, int32_t um) {
+  TARGET t = startpoint;
+  int32_t steps_before = startpoint_steps.axis[Z];
+
+  queue_wait();
+  z_step_mask = mask;
+  t.axis[Z] = startpoint.axis[Z] + um;
+  t.F = settings.max_feedrate[Z];
+  t.f_multiplier = 256;
+  enqueue(&t);
+  queue_wait();
+  z_step_mask = 3;
+  startpoint.axis[Z] -= um;
+  startpoint_steps.axis[Z] = steps_before;
+}
+
+uint8_t probe_align_z(uint8_t iterations, int32_t accuracy) {
+  const int32_t px1 = (int32_t)(Z_STEPPER_ALIGN_X1 * 1000.);
+  const int32_t px2 = (int32_t)(Z_STEPPER_ALIGN_X2 * 1000.);
+  const int32_t py = (int32_t)(Z_STEPPER_ALIGN_Y * 1000.);
+  const float sx1 = (float)(Z_STEPPER_X1 * 1000.);
+  const float sx2 = (float)(Z_STEPPER_X2 * 1000.);
+  const int32_t max_move = (int32_t)(Z_STEPPER_ALIGN_MAX * 1000.);
+  int32_t z1, z2, last_diff = 0x7FFFFFFF;
+  uint8_t i, ok = 0;
+
+  if ( ! homed_xyz())
+    return 0;
+  queue_wait();
+  zcorr_suspend();
+  for (i = 0; i < iterations; i++) {
+    float slope, zs1, zs2;
+    int32_t diff, move;
+
+    if ( ! probe_point(px1, py, &z1) || ! probe_point(px2, py, &z2))
+      break;
+    diff = z2 - z1;
+    sersendf_P(("echo:G34 #%su: Z1 %lq Z2 %lq, difference %lq\n"),
+               (uint8_t)(i + 1), z1, z2, diff);
+    if (labs(diff) <= accuracy) {
+      ok = 1;
+      break;
+    }
+    if (labs(diff) >= labs(last_diff)) {
+      serial_writestr("echo:G34: not getting better, check Z_STEPPER_X1/X2\n");
+      break;
+    }
+    last_diff = diff;
+
+    /**
+      The bed looks higher where the gantry is lower. Heights at the
+      lead screws (straight line through the probe points), raise the
+      lower side of the gantry by the difference. Only up: no crash.
+    */
+    slope = (float)diff / (float)(px2 - px1);
+    zs1 = (float)z1 + slope * (sx1 - (float)px1);
+    zs2 = (float)z1 + slope * (sx2 - (float)px1);
+    move = (int32_t)lrintf(zs1 - zs2);
+    if (labs(move) > max_move) {
+      serial_writestr("echo:G34: difference too large (Z_STEPPER_ALIGN_MAX)\n");
+      break;
+    }
+    probe_raise(0);
+    if (move > 0)
+      z_single_up(1, move);
+    else
+      z_single_up(2, -move);
+  }
+  probe_stow();
+  queue_wait();
+  zcorr_resume();
+
+  // Z and Z2 moved differently: find Z = 0 again.
+  if ( ! probe_home_z())
+    return 0;
+  if (ok)
+    serial_writestr("echo:G34: Z steppers aligned, run G29 again\n");
+  else
+    serial_writestr("echo:G34: not aligned\n");
+  return ok;
+}
+#endif /* Z_STEPPER_ALIGN */
 
 uint8_t probe_mesh(void) {
   #ifdef BED_LEVELING

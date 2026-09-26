@@ -507,6 +507,46 @@
     #define BLTOUCH_DELAY        500
   #endif
 #endif
+/**
+  Power loss recovery: records in the SPI flash, for SD / flash prints.
+*/
+#if defined POWER_LOSS_RECOVERY && ! (defined SPI_FLASH && \
+    (defined SD_CARD_SELECT_PIN || defined SPI_FLASH_FILES))
+  #undef POWER_LOSS_RECOVERY
+#endif
+
+/**
+  G34 (printer config): Z and Z2 with separate STEP pins, a Z probe.
+*/
+#ifdef Z_STEPPER_ALIGN
+  #ifndef Z_PROBE
+    #error Z_STEPPER_ALIGN (G34) needs a Z probe (BLTOUCH).
+  #endif
+  #if ! defined Z2_STEP_PIN || ! defined Z_STEP_PIN
+    #error Z_STEPPER_ALIGN (G34) needs Z_STEP_PIN and Z2_STEP_PIN.
+  #endif
+  #ifndef Z_STEPPER_ALIGN_X1
+    #define Z_STEPPER_ALIGN_X1   (X_MIN + 10.0)
+    #define Z_STEPPER_ALIGN_X2   (X_MAX - 10.0)
+  #endif
+  #ifndef Z_STEPPER_ALIGN_Y
+    #define Z_STEPPER_ALIGN_Y    ((Y_MIN + Y_MAX) / 2.0)
+  #endif
+  #ifndef Z_STEPPER_X1
+    #define Z_STEPPER_X1         Z_STEPPER_ALIGN_X1
+    #define Z_STEPPER_X2         Z_STEPPER_ALIGN_X2
+  #endif
+  #ifndef Z_STEPPER_ALIGN_ITERATIONS
+    #define Z_STEPPER_ALIGN_ITERATIONS 5
+  #endif
+  #ifndef Z_STEPPER_ALIGN_ACC
+    #define Z_STEPPER_ALIGN_ACC  0.02
+  #endif
+  #ifndef Z_STEPPER_ALIGN_MAX
+    #define Z_STEPPER_ALIGN_MAX  5.0
+  #endif
+#endif
+
 #ifdef NO_THERMAL_PROTECTION
   #warning NO_THERMAL_PROTECTION: thermal runaway protection is DISABLED.
 #endif

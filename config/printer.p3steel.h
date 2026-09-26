@@ -183,6 +183,34 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define RETRACT_RECOVER_LENGTH   0.0
 #define RETRACT_RECOVER_FEEDRATE 25.0
 
+/** \def HOST_WATCH HOST_TIMEOUT HOST_LOST_HOTEND_TEMP HOST_LOST_RETRACT HOST_LOST_Z_LIFT
+  Reaction to a lost host (M86): printing from the host, when no line came
+  for HOST_TIMEOUT seconds while the printer waited for one, or the USB
+  port was closed / unplugged: retract HOST_LOST_RETRACT mm, lift Z by
+  HOST_LOST_Z_LIFT mm, park at FILAMENT_CHANGE_PARK_X/Y, hotend to
+  HOST_LOST_HOTEND_TEMP (0 = off). The bed keeps its temperature. Pausing
+  in the host longer than HOST_TIMEOUT triggers it, too. HOST_TIMEOUT 0:
+  USB unplugged only. Doesn't replace the thermal protection.
+*/
+#define HOST_WATCH
+#define HOST_TIMEOUT             300
+#define HOST_LOST_HOTEND_TEMP    0
+#define HOST_LOST_RETRACT        2.0
+#define HOST_LOST_Z_LIFT         10.0
+
+/** \def POWER_LOSS_RECOVERY PLR_INTERVAL PLR_Z_RAISE PLR_PURGE_LENGTH
+  Power loss recovery (M413, M1000, like Marlin), for prints from the SD
+  card or SPI flash files: the print state goes into the SPI flash at
+  every layer change and at least every PLR_INTERVAL seconds. After a
+  power loss M1000 heats up, lifts Z by PLR_Z_RAISE mm, homes X and Y,
+  primes PLR_PURGE_LENGTH mm and continues. Needs SPI_FLASH (the records
+  use its last 8 kB); printing from the host it does nothing.
+*/
+#define POWER_LOSS_RECOVERY
+#define PLR_INTERVAL             30
+#define PLR_Z_RAISE              2.0
+#define PLR_PURGE_LENGTH         3.0
+
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,
@@ -221,6 +249,22 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define Z_PROBE_RETRACT          3.0
 #define Z_PROBE_CLEARANCE        5.0
 #define Z_PROBE_LOW_POINT        -2.0
+
+/** \def Z_STEPPER_ALIGN_X1 Z_STEPPER_ALIGN_X2 Z_STEPPER_ALIGN_Y Z_STEPPER_X1 Z_STEPPER_X2 Z_STEPPER_ALIGN_ITERATIONS Z_STEPPER_ALIGN_ACC Z_STEPPER_ALIGN_MAX
+  G34 (Z_STEPPER_ALIGN in the board file). Probe points (probe position,
+  mm) near the left and right bed edge, the X positions of the Z (X1) and
+  Z2 (X2) lead screws in the same coordinates (outside the bed, measure
+  them). G34 stops after ITERATIONS or when both points are within ACC mm,
+  it refuses to correct more than MAX mm.
+*/
+#define Z_STEPPER_ALIGN_X1       20.0
+#define Z_STEPPER_ALIGN_X2       200.0
+#define Z_STEPPER_ALIGN_Y        90.0
+#define Z_STEPPER_X1             -35.0
+#define Z_STEPPER_X2             255.0
+#define Z_STEPPER_ALIGN_ITERATIONS 5
+#define Z_STEPPER_ALIGN_ACC      0.02
+#define Z_STEPPER_ALIGN_MAX      5.0
 
 /** \def BABYSTEPPING BABYSTEP_FEEDRATE BABYSTEP_LIMIT
   M290 Z<mm>: move the nozzle up/down right away, also while printing, to

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Renode test of skew correction (M852), Z backlash compensation (M425),
-firmware retract (G10, G11, M207, M208) and their storage on the P3 Steel build (make CHIP=F401 TEST=0).
+firmware retract (G10, G11, M207, M208), host lost (M86) and their storage on the P3 Steel build (make CHIP=F401 TEST=0).
 
 X, Y, E steps are timer one pulse starts (STEP_TIMER_PULSES: TIM1, TIM2,
 TIM3), Z steps GPIO pulses on PB12.
@@ -15,17 +15,39 @@ Checks:
     same direction none, M114 Z unaffected; M425 F0.5 half of it
   - G10 / G11 (M207 S F Z, M208 S F): E retract and prime, Z lift kept
     for travel moves, G-code coordinates unchanged, repeated G10 ignored
+  - M86 S3: no line for 3 s while printing (armed by a move with E) ->
+    retract, Z up, park, hotend off; a long G4 doesn't count
   - M500, M502, M501 store and load M852, M425 and M207 / M208
 """
-import os, re, subprocess, sys
+import math, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
 REPL = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, 'stm32f401_dma.repl')
 
-OVERSAMPLE, SLOTS = 16, 2
-ROOM = 2048                              # thermistor ADC about 25 C
+OVERSAMPLE, SLOTS, ADC_MAX = 16, 2, 4095
+RP, PTS = 4700.0, [(25.0, 100000.0), (150.0, 1641.9), (250.0, 226.15)]
+def sh_coef():                           # Steinhart-Hart, as the board config
+    (t1, r1), (t2, r2), (t3, r3) = PTS
+    l1, l2, l3 = map(math.log, (r1, r2, r3))
+    y1, y2, y3 = (1 / (t + 273.15) for t in (t1, t2, t3))
+    g2, g3 = (y2 - y1) / (l2 - l1), (y3 - y1) / (l3 - l1)
+    c = (g3 - g2) / (l3 - l2) / (l1 + l2 + l3)
+    b = g2 - c * (l1 * l1 + l1 * l2 + l2 * l2)
+    return y1 - (b + l1 * l1 * c) * l1, b, c
+A, B, C = sh_coef()
+def adc_to_c(adc):
+    l = math.log(RP * adc / (ADC_MAX - adc))
+    return 1 / (A + B * l + C * l ** 3) - 273.15
+def c_to_adc(t):
+    lo, hi = 1, ADC_MAX - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if adc_to_c(mid) > t: lo = mid
+        else: hi = mid
+    return hi
+ROOM = c_to_adc(25.0)
 _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).stdout
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
@@ -98,6 +120,22 @@ mark('rt_extra'); send('M208 S0.1\nG10\nG11\n'); run('1.2')
 mark('rt_print'); send('G1 X10 E1 F1200\n'); run('0.6')
 mark('rt_pos3'); send('M114\n'); run('0.05')
 mark('rt_report'); send('M208\n'); run('0.1')
+
+# ---- M86 host lost ----
+# Hotend at 200 C (thermistor ADC), X and Y homed for parking.
+HOT = c_to_adc(200.0)
+adc(HOT, ROOM); run('0.3')
+send('M104 S200\n'); run('0.3')
+for port, n, ax in (('B', 10, 'X'), ('B', 3, 'Y')):
+    pin(port, n, False)
+    send('G28 %s\n' % ax); run('0.5')
+    pin(port, n, True); run('1.0')
+# Fewer Z steps for the 10 mm lift (faster simulation).
+mark('hl_set'); send('M92 Z400\nM86 S3 E0\nM86\n'); run('0.2')
+mark('hl_g4'); send('G1 X20 Y20 E0.5 F3000\nG4 P5000\n'); run('6.0')
+mark('hl_wait'); run('1.5')                   # 1.5 s after G4: not yet
+mark('hl_lost'); run('9.0')                   # 3 s: lost, park
+mark('hl_pos'); send('M114\nM105\n'); run('0.1')
 
 # ---- storage ----
 mark('st_save'); send('M852 I-0.0025\nM500\n'); run('2.5')
@@ -179,6 +217,17 @@ check('M208 S0.1: 0.1 mm more primed', abs(pulses('rt_extra', 'E') - (2508 + 250
 check('  absolute E continues (E1 = 1672 steps)', pulses('rt_print', 'E') == 1672 and pos('rt_pos3') == (10.0, 0.0, 1.0, 1.0),
       (pulses('rt_print', 'E'), pos('rt_pos3')))
 check('  M208 reported', line('rt_report', 'M208') == 'M208 S0.10 F1200.00', uart('rt_report'))
+check('M86 reported', line('hl_set', 'M86') == 'M86 S3 E0', uart('hl_set'))
+check('host lost: not during G4 P5000 nor 1.5 s after', not any('Host lost' in l for l in uart('hl_g4') + uart('hl_wait')),
+      uart('hl_g4') + uart('hl_wait'))
+ul = uart('hl_lost')
+check('host lost after 3 s without lines', 'echo:No line from the host for 3 s' in ul and 'echo:Host lost, parking' in ul
+      and 'echo:Parked, hotend temperature lowered' in ul, ul)
+check('  retract 2 mm, Z up 10 mm', pulses('hl_lost', 'E') == 3344 and pulses('hl_lost', 'Z') == 4000,
+      (pulses('hl_lost', 'E'), pulses('hl_lost', 'Z')))
+p = pos('hl_pos')
+check('  parked at X10 Y170, Z + 10', p is not None and p[:3] == (10.0, 170.0, 11.0), p)
+check('  hotend target 0', any(re.match(r'ok T:[\d.]+/0\.0 ', l) for l in uart('hl_pos')), uart('hl_pos'))
 check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('st_save')), uart('st_save'))
 check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_def', 'M425') == 'M425 F1.00 Z0.00',
       (line('st_def', 'M852'), line('st_def', 'M425')))

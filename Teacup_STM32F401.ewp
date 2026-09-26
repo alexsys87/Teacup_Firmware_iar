@@ -2326,6 +2326,12 @@
         <file>
             <name>$PROJ_DIR$\core\retract.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\host_watch.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\core\power_loss.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>

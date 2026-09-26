@@ -27,7 +27,7 @@
     PA14  SWCLK                    PB15  Z_MIN / Z probe (EXTI15)
     PA15  Y_STEP       (TIM2_CH1)  PC13  BLTouch servo (LED on the pin)
                                    PC14  SD card CS (*, remove 32 kHz xtal)
-                                   PC15  spare (*, SD detect / Z2_STEP)
+                                   PC15  spare (*, SD detect / Z2_STEP, G34)
 
     (*) stand-alone printing, optional. Encoder, buttons and beeper go to a
         PCF8574 I/O expander on the I2C bus, no pins needed.
@@ -108,6 +108,20 @@
 #ifndef BLTOUCH
   #define Z_INVERT_MIN                   // Z_MIN_ENDSTOP_INVERTING true
 #endif                                   // BLTouch: active high
+
+/** \def Z_STEPPER_ALIGN Z2_STEP_PIN
+  Independent Z alignment (G34, like Marlin's Z_STEPPER_AUTO_ALIGN), needs
+  BLTOUCH: the STEP input of the Z2 driver moves from PB12 to PC15 (remove
+  the 32.768 kHz crystal on PC14/PC15), DIR stays in parallel on PB13. Z
+  and Z2 still step together, G34 raises one of them alone until the
+  gantry is parallel to the bed. Probe points and lead screw positions:
+  Z_STEPPER_ALIGN_* in the printer config. Only needed if Z and Z2 drift
+  apart (e.g. turning a lead screw by hand with the motors off).
+*/
+//#define Z_STEPPER_ALIGN
+#ifdef Z_STEPPER_ALIGN
+  #define Z2_STEP_PIN            PC_15   // Z2 driver STEP (E1_STEP, D36)
+#endif
 
 #define E_STEP_PIN               PB_4    // E0_STEP (D26), TIM3_CH1
 #define E_DIR_PIN                PB_5    // E0_DIR  (D28)
@@ -195,8 +209,8 @@
     SD card CS            PC_14  SPI1 shared with the SPI flash; PC14 is
                                  the 32.768 kHz crystal: remove it (the
                                  firmware doesn't use the LSE)
-    spare                 PC_15  SD detect, or Z2_STEP for independent Z
-                                 alignment later (same crystal removal)
+    spare                 PC_15  SD detect, or Z2_STEP (Z_STEPPER_ALIGN
+                                 above, same crystal removal)
     display               I2C1   PB6/PB7 (SSD1306 or HD44780 + PCF8574)
     encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27
     beeper

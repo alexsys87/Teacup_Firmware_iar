@@ -40,6 +40,8 @@
 #include "probe.h"
 #include "servo.h"
 #include "retract.h"
+#include "host_watch.h"
+#include "power_loss.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -332,6 +334,10 @@ void process_gcode_command(void) {
 				//?
         temp_wait();
 				bed_level_enqueue(&next_target.target);
+				#ifdef HOST_WATCH
+					if ((gcode_active & GCODE_SOURCE_SERIAL) && next_target.seen_E)
+						host_watch_arm();
+				#endif
 				break;
 
 #ifndef NO_ARC_SUPPORT
@@ -350,6 +356,10 @@ void process_gcode_command(void) {
         //?
         if ( ! arc_move(next_target.G == 2))
           serial_writestr_P(("echo:G2/G3 bad parameters\n"));
+        #ifdef HOST_WATCH
+          else if ((gcode_active & GCODE_SOURCE_SERIAL) && next_target.seen_E)
+            host_watch_arm();
+        #endif
         break;
 #endif
 
@@ -510,6 +520,35 @@ void process_gcode_command(void) {
           sync_target_to_startpoint();
         }
         break;
+
+  #ifdef Z_STEPPER_ALIGN
+      case 34:
+        //? --- G34: Align Z and Z2 ---
+        //?
+        //? Example: G34
+        //? Example: G34 I8 T0.01
+        //?
+        //? Probes at Z_STEPPER_ALIGN_X1 and X2, raises the lower lead screw
+        //? alone (separate STEP of Z2), until both points are within T mm
+        //? (default Z_STEPPER_ALIGN_ACC) or after I iterations (default
+        //? Z_STEPPER_ALIGN_ITERATIONS). Then homes Z again. Needs XYZ homed.
+        //? Run G29 afterwards, the mesh was measured with the old tilt.
+        //?
+        {
+          uint8_t iter = Z_STEPPER_ALIGN_ITERATIONS;
+          int32_t acc = (int32_t)(Z_STEPPER_ALIGN_ACC * 1000.);
+
+          if (next_target.seen_I && next_target.I_milli >= 1000 &&
+              next_target.I_milli <= 30000)
+            iter = (uint8_t)(next_target.I_milli / 1000);
+          if (next_target.seen_T && next_target.T_value > 0)
+            acc = next_target.T_value;
+          queue_wait();
+          probe_align_z(iter, acc);
+          sync_target_to_startpoint();
+        }
+        break;
+  #endif
 #endif /* Z_PROBE */
 
 			case 90:
@@ -772,6 +811,9 @@ void process_gcode_command(void) {
         //? This opens a file for reading. This file is valid up to M22 or up
         //? to the next M23.
         sd_open(gcode_str_buf);
+        #ifdef POWER_LOSS_RECOVERY
+          plr_clear();                    // A new print, no resume.
+        #endif
         break;
 
       case 24:
@@ -1504,6 +1546,78 @@ void process_gcode_command(void) {
             axes_um_to_steps(startpoint.axis, st);
             startpoint_steps.axis[X] = st[X];
             startpoint_steps.axis[Y] = st[Y];
+          }
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
+      #ifdef POWER_LOSS_RECOVERY
+      case 413:
+        //? --- M413: Power loss recovery on / off ---
+        //?
+        //? Example: M413 S1
+        //?
+        //? S1 records the state of SD / flash prints in the SPI flash, S0
+        //? doesn't. Without S: report, also an interrupted print.
+        //?
+        if (next_target.seen_S)
+          settings.plr_enabled = next_target.S ? 1 : 0;
+        else {
+          serial_writestr(settings.plr_enabled ? "echo:Power-loss recovery ON\n"
+                                               : "echo:Power-loss recovery OFF\n");
+          plr_report();
+        }
+        break;
+
+      case 1000:
+        //? --- M1000: Resume the print after a power loss ---
+        //?
+        //? Example: M1000
+        //? Example: M1000 C
+        //?
+        //? Heats up, lifts Z, homes X and Y, primes, returns to the stored
+        //? position and continues the file (see core/power_loss.c).
+        //? C discards the record instead.
+        //?
+        if (next_target.seen_C) {
+          plr_clear();
+          serial_writestr("echo:Power loss record discarded\n");
+        }
+        else {
+          plr_resume();
+          sync_target_to_startpoint();
+        }
+        break;
+      #endif
+
+      #ifdef HOST_WATCH
+      case 86:
+        //? --- M86: Host lost timeout ---
+        //?
+        //? Example: M86 S60 E0
+        //?
+        //? While printing from the host: when no line came for S seconds
+        //? (0 = only USB unplugged is detected), park and set the hotend to
+        //? E degrees (0 = off). Teacup specific. Without parameters: report.
+        //?
+        if (next_target.seen_S || next_target.seen_E) {
+          if (next_target.seen_S) {
+            if (next_target.S >= 0 && next_target.S <= 3600)
+              settings.host_timeout = (uint32_t)next_target.S;
+            else
+              serial_writestr("echo:M86 S out of range (0..3600)\n");
+          }
+          if (next_target.seen_E) {
+            int32_t t = raw_axis[E] / 1000;
+
+            restore_axis_word(E);
+            if (t >= 0 && t <= 300)
+              settings.host_lost_temp = (uint32_t)t;
+            else
+              serial_writestr("echo:M86 E out of range (0..300)\n");
           }
         }
         else {

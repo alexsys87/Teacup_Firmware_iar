@@ -81,11 +81,29 @@ void sd_list(const char* path) {
   Before too long this will cause the printer to read G-code from this file
   until done or until stopped by G-code coming in over the serial line.
 */
+/// Name of the open file (8.3 plus path, as given to M23).
+static char open_name[32];
+
 void sd_open(const char* filename) {
+  uint8_t i;
+
+  open_name[0] = '\0';
   result = pf_open(filename);
   if (result != FR_OK) {
     sersendf_P(("echo:Failed to open file. (%su)\n"), result);
+    return;
   }
+  for (i = 0; filename[i] && i < sizeof(open_name) - 1; i++)
+    open_name[i] = filename[i];
+  open_name[i] = '\0';
+}
+
+uint32_t sd_position(void) {
+  return sdfile.fptr;
+}
+
+const char *sd_file_name(void) {
+  return open_name;
 }
 
 /** Read a line of G-code from a file.
