@@ -25,6 +25,11 @@ typedef struct {
   int32_t       skew_xy;        ///< M852 I, XY skew factor, millionths.
   uint32_t      backlash_z;     ///< M425 Z, Z backlash, um.
   uint32_t      backlash_f;     ///< M425 F, fraction corrected, 1/1000.
+  uint32_t      retract_length; ///< M207 S, firmware retract, um.
+  uint32_t      retract_feedrate; ///< M207 F, mm/min.
+  int32_t       retract_zlift;  ///< M207 Z, um.
+  int32_t       recover_extra;  ///< M208 S, extra prime after G11, um.
+  uint32_t      recover_feedrate; ///< M208 F, mm/min.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.

@@ -19,9 +19,10 @@
 
 /**
   Correction in um for a logical position, added to Z before the conversion
-  to motor steps. 0 while suspended (homing, probing).
+  to motor steps: mesh, babysteps, firmware retract Z lift. 0 while
+  suspended (homing, probing).
 */
-#if defined BED_LEVELING || defined BABYSTEPPING
+#if defined BED_LEVELING || defined BABYSTEPPING || defined FIRMWARE_RETRACT
   int32_t bed_level_offset(const axes_int32_t axis);
 #else
   TEACUP_INLINE int32_t bed_level_offset(const axes_int32_t axis) {

@@ -3500,6 +3500,9 @@
         <file>
             <name>$PROJ_DIR$\core\thermal_protection.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\retract.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>

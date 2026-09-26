@@ -29,6 +29,7 @@
 #include "sersendf.h"
 #include "emergency_parser.h"
 #include "babystep.h"
+#include "retract.h"
 
 /// Nesting counter of zcorr_suspend().
 static uint8_t suspended = 0;
@@ -37,7 +38,7 @@ static uint8_t suspended = 0;
 mesh_t mesh;
 #endif
 
-#if defined BED_LEVELING || defined BABYSTEPPING
+#if defined BED_LEVELING || defined BABYSTEPPING || defined FIRMWARE_RETRACT
 
 #ifdef BED_LEVELING
 /// Bilinear mesh height at X, Y (um), constant beyond the outer points.
@@ -81,6 +82,9 @@ int32_t bed_level_offset(const axes_int32_t axis) {
   #ifdef BABYSTEPPING
     offset = babystep_offset();
   #endif
+  #ifdef FIRMWARE_RETRACT
+    offset += retract_hop_um;
+  #endif
   #ifdef BED_LEVELING
     if (mesh.active && mesh.nx) {
       float f = fade_factor(axis[Z]);
@@ -94,7 +98,7 @@ int32_t bed_level_offset(const axes_int32_t axis) {
   return offset;
 }
 
-#endif /* BED_LEVELING || BABYSTEPPING */
+#endif /* BED_LEVELING || BABYSTEPPING || FIRMWARE_RETRACT */
 
 void zcorr_sync_logical(void) {
   axes_int32_t p;

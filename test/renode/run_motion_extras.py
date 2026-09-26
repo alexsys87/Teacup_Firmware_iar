@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Renode test of skew correction (M852), Z backlash compensation (M425)
-and their storage on the P3 Steel build (make CHIP=F401 TEST=0).
+"""Renode test of skew correction (M852), Z backlash compensation (M425),
+firmware retract (G10, G11, M207, M208) and their storage on the P3 Steel build (make CHIP=F401 TEST=0).
 
 X, Y, E steps are timer one pulse starts (STEP_TIMER_PULSES: TIM1, TIM2,
 TIM3), Z steps GPIO pulses on PB12.
@@ -13,7 +13,9 @@ Checks:
   - M852 without parameters and M503 report the factor
   - M425 Z0.1: Z reversals get 0.1 mm (800 steps) extra, moves in the
     same direction none, M114 Z unaffected; M425 F0.5 half of it
-  - M500, M502, M501 store and load M852 and M425
+  - G10 / G11 (M207 S F Z, M208 S F): E retract and prime, Z lift kept
+    for travel moves, G-code coordinates unchanged, repeated G10 ignored
+  - M500, M502, M501 store and load M852, M425 and M207 / M208
 """
 import os, re, subprocess, sys
 
@@ -83,6 +85,20 @@ mark('bl_pos'); send('M114\n'); run('0.05')
 mark('bl_half'); send('M425 F0.5\nG1 Z1\n'); run('1.0')
 mark('bl_report'); send('M425\n'); run('0.1')
 
+# ---- G10 / G11 firmware retract ----
+send('M425 Z0\nG92 E0\n'); run('0.1')
+mark('rt_set'); send('M207 S1.5 F1500 Z0.2\nM208 S0 F1200\nM207\n'); run('0.2')
+mark('rt_g10'); send('G10\n'); run('0.6')
+mark('rt_pos'); send('M114\n'); run('0.05')
+mark('rt_travel'); send('G1 X5 F3000\n'); run('0.6')
+mark('rt_g10b'); send('G10\n'); run('0.3')
+mark('rt_g11'); send('G11\n'); run('0.6')
+mark('rt_pos2'); send('M114\n'); run('0.05')
+mark('rt_extra'); send('M208 S0.1\nG10\nG11\n'); run('1.2')
+mark('rt_print'); send('G1 X10 E1 F1200\n'); run('0.6')
+mark('rt_pos3'); send('M114\n'); run('0.05')
+mark('rt_report'); send('M208\n'); run('0.1')
+
 # ---- storage ----
 mark('st_save'); send('M852 I-0.0025\nM500\n'); run('2.5')
 mark('st_def'); send('M502\nM503\n'); run('0.2')
@@ -147,10 +163,27 @@ check('backlash: extra 800 steps on reversals only', zs == [8000, 8000, 4800, 40
 check('  M114 Z2', pos('bl_pos') is not None and pos('bl_pos')[2] == 2.0, pos('bl_pos'))
 check('  M425 F0.5: 400 extra', pulses('bl_half', 'Z') == 8400, pulses('bl_half', 'Z'))
 check('  M425 reported', line('bl_report', 'M425') == 'M425 F0.50 Z0.10', uart('bl_report'))
+check('M207 reported', line('rt_set', 'M207') == 'M207 S1.50 F1500.00 Z0.20', uart('rt_set'))
+check('G10: 1.5 mm E back, 0.2 mm Z up', pulses('rt_g10', 'E') == 2508 and pulses('rt_g10', 'Z') == 1600,
+      (pulses('rt_g10', 'E'), pulses('rt_g10', 'Z')))
+check('  M114: E, Z coordinates unchanged', pos('rt_pos') is not None and pos('rt_pos')[2:] == (1.0, 0.0), pos('rt_pos'))
+check('  travel keeps the lift (no Z steps)', pulses('rt_travel', 'X') == 800 and pulses('rt_travel', 'Z') == 0,
+      (pulses('rt_travel', 'X'), pulses('rt_travel', 'Z')))
+check('  second G10 ignored', pulses('rt_g10b', 'E') == 0 and pulses('rt_g10b', 'Z') == 0,
+      (pulses('rt_g10b', 'E'), pulses('rt_g10b', 'Z')))
+check('G11: Z down, 1.5 mm E primed', pulses('rt_g11', 'E') == 2508 and pulses('rt_g11', 'Z') == 1600,
+      (pulses('rt_g11', 'E'), pulses('rt_g11', 'Z')))
+check('  M114 X5 Z1 E0', pos('rt_pos2') == (5.0, 0.0, 1.0, 0.0), pos('rt_pos2'))
+check('M208 S0.1: 0.1 mm more primed', abs(pulses('rt_extra', 'E') - (2508 + 2508 + 167)) <= 1,
+      pulses('rt_extra', 'E'))
+check('  absolute E continues (E1 = 1672 steps)', pulses('rt_print', 'E') == 1672 and pos('rt_pos3') == (10.0, 0.0, 1.0, 1.0),
+      (pulses('rt_print', 'E'), pos('rt_pos3')))
+check('  M208 reported', line('rt_report', 'M208') == 'M208 S0.10 F1200.00', uart('rt_report'))
 check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('st_save')), uart('st_save'))
 check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_def', 'M425') == 'M425 F1.00 Z0.00',
       (line('st_def', 'M852'), line('st_def', 'M425')))
-check('M501: loaded', line('st_load', 'M852') == 'M852 I-0.002500' and line('st_load', 'M425') == 'M425 F0.50 Z0.10',
+check('M501: loaded', line('st_load', 'M852') == 'M852 I-0.002500' and line('st_load', 'M425') == 'M425 F0.50 Z0.00'
+      and line('st_load', 'M207') == 'M207 S1.50 F1500.00 Z0.20',
       (line('st_load', 'M852'), line('st_load', 'M425')))
 check('no error / reset', 'Error:' not in out and out.count('] start') == 1, out.count('] start'))
 print('\n%d failure(s)' % fails)

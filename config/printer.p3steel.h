@@ -170,6 +170,19 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define BACKLASH_COMPENSATION
 #define BACKLASH_Z               0.0
 
+/** \def FIRMWARE_RETRACT RETRACT_LENGTH RETRACT_FEEDRATE RETRACT_ZLIFT RETRACT_RECOVER_LENGTH RETRACT_RECOVER_FEEDRATE
+  Firmware retract (G10 / G11, like Marlin's FWRETRACT): the slicer sends
+  G10 / G11 instead of E moves ("Use firmware retraction" in PrusaSlicer),
+  M207 / M208 change length and speeds while printing. Length and lift in
+  mm, speeds in mm/s. Direct drive: 0.8..2 mm.
+*/
+#define FIRMWARE_RETRACT
+#define RETRACT_LENGTH           1.0
+#define RETRACT_FEEDRATE         25.0
+#define RETRACT_ZLIFT            0.0
+#define RETRACT_RECOVER_LENGTH   0.0
+#define RETRACT_RECOVER_FEEDRATE 25.0
+
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,

@@ -39,6 +39,7 @@
 #include "filament.h"
 #include "probe.h"
 #include "servo.h"
+#include "retract.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -376,6 +377,27 @@ void process_gcode_command(void) {
 				}
 				break;
 
+      #ifdef FIRMWARE_RETRACT
+      case 10:
+        //? --- G10: Firmware retract ---
+        //?
+        //? Retract the filament by M207 S at M207 F, then lift Z by M207 Z
+        //? (the lift stays until G11). Ignored when retracted already.
+        //? Like Marlin's FWRETRACT; the G-code coordinates don't change.
+        //?
+        retract_do();
+        break;
+
+      case 11:
+        //? --- G11: Firmware recover ---
+        //?
+        //? Lower Z again, prime M207 S + M208 S at M208 F. Ignored when not
+        //? retracted.
+        //?
+        recover_do();
+        break;
+      #endif
+
 			case 20:
 				//? --- G20: Set Units to Inches ---
 				//?
@@ -416,6 +438,9 @@ void process_gcode_command(void) {
 				//?
 
 				queue_wait();
+				#ifdef FIRMWARE_RETRACT
+					retract_reset();
+				#endif
 
 				if (next_target.seen_X) {
 					#if defined	X_MIN_PIN
@@ -1479,6 +1504,62 @@ void process_gcode_command(void) {
             axes_um_to_steps(startpoint.axis, st);
             startpoint_steps.axis[X] = st[X];
             startpoint_steps.axis[Y] = st[Y];
+          }
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
+      #ifdef FIRMWARE_RETRACT
+      case 207:
+        //? --- M207: Firmware retract settings ---
+        //?
+        //? Example: M207 S1.5 F2100 Z0.2
+        //?
+        //? S retract length (mm), F speed (mm/min), Z lift (mm) for G10.
+        //? Without parameters: report (see M503).
+        //?
+      case 208:
+        //? --- M208: Firmware recover settings ---
+        //?
+        //? Example: M208 S0.05 F1200
+        //?
+        //? S extra length primed after G11 (mm, may be negative), F speed
+        //? (mm/min).
+        //?
+        if (next_target.seen_S || next_target.seen_F || next_target.seen_Z) {
+          if (next_target.seen_S) {
+            if (next_target.M == 207 && next_target.S >= 0 &&
+                next_target.S <= 100000L)
+              settings.retract_length = (uint32_t)next_target.S;
+            else if (next_target.M == 208 && next_target.S >= -100000L &&
+                     next_target.S <= 100000L)
+              settings.recover_extra = next_target.S;
+            else
+              serial_writestr("echo:S out of range\n");
+          }
+          if (next_target.seen_F) {
+            int32_t f = next_target.F_milli / 1000;
+
+            if (f >= 60 && f <= 60000L) {
+              if (next_target.M == 207)
+                settings.retract_feedrate = (uint32_t)f;
+              else
+                settings.recover_feedrate = (uint32_t)f;
+            }
+            else
+              serial_writestr("echo:F out of range (60..60000)\n");
+          }
+          if (next_target.seen_Z) {
+            int32_t z = raw_axis[Z];
+
+            restore_axis_word(Z);
+            if (next_target.M == 207 && z >= 0 && z <= 10000)
+              settings.retract_zlift = z;
+            else
+              serial_writestr("echo:Z out of range (0..10)\n");
           }
         }
         else {

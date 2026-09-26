@@ -7,7 +7,8 @@
 
   Stored: steps per mm, max. feedrates, max. accelerations, accelerations
   for printing, retracts and travel, linear advance K, input shaping and
-  S-curve, XY skew (M852), Z backlash (M425),
+  S-curve, XY skew (M852), Z backlash (M425), firmware retract (M207,
+  M208),
   jerk, home offsets, PID values of all heaters and the part fan
   feed-forward (M301 F), stepper idle timeout,
   Z offset (M290), probe offset (M851), filament runout (M412), bed
@@ -64,6 +65,21 @@
 #endif
 #ifndef BACKLASH_Z
   #define BACKLASH_Z 0.0
+#endif
+#ifndef RETRACT_LENGTH
+  #define RETRACT_LENGTH 3.0
+#endif
+#ifndef RETRACT_FEEDRATE
+  #define RETRACT_FEEDRATE 45.0
+#endif
+#ifndef RETRACT_ZLIFT
+  #define RETRACT_ZLIFT 0.0
+#endif
+#ifndef RETRACT_RECOVER_LENGTH
+  #define RETRACT_RECOVER_LENGTH 0.0
+#endif
+#ifndef RETRACT_RECOVER_FEEDRATE
+  #define RETRACT_RECOVER_FEEDRATE 8.0
 #endif
 #ifndef MAX_JERK_X
   #define MAX_JERK_X 0
@@ -125,13 +141,18 @@ typedef struct {
   uint32_t   s_curve_us;
 } settings_store_v5_t;
 
-/// Version 6: version 5 plus fan feed-forward, skew, backlash.
+/// Version 6: version 5 plus fan feed-forward, skew, backlash, retract.
 typedef struct {
   settings_store_v5_t v5;
   uint32_t   pid_fan_ff;        ///< M301 F, 1/100 PWM counts.
   int32_t    skew_xy;           ///< M852 I, millionths.
   uint32_t   backlash_z;        ///< M425 Z, um.
   uint32_t   backlash_f;        ///< M425 F, 1/1000.
+  uint32_t   retract_length;    ///< M207 S, um.
+  uint32_t   retract_feedrate;  ///< M207 F, mm/min.
+  int32_t    retract_zlift;     ///< M207 Z, um.
+  int32_t    recover_extra;     ///< M208 S, um.
+  uint32_t   recover_feedrate;  ///< M208 F, mm/min.
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -172,6 +193,12 @@ void settings_defaults(void) {
                                (XY_SKEW_FACTOR < 0 ? -0.5 : 0.5));
   settings.backlash_z = (uint32_t)(BACKLASH_Z * 1000. + 0.5);
   settings.backlash_f = 1000;
+  settings.retract_length = (uint32_t)(RETRACT_LENGTH * 1000. + 0.5);
+  settings.retract_feedrate = (uint32_t)(RETRACT_FEEDRATE * 60. + 0.5);
+  settings.retract_zlift = (int32_t)(RETRACT_ZLIFT * 1000. + 0.5);
+  settings.recover_extra = (int32_t)(RETRACT_RECOVER_LENGTH * 1000. +
+                                     (RETRACT_RECOVER_LENGTH < 0 ? -0.5 : 0.5));
+  settings.recover_feedrate = (uint32_t)(RETRACT_RECOVER_FEEDRATE * 60. + 0.5);
   settings.max_jerk[X] = MAX_JERK_X;
   settings.max_jerk[Y] = MAX_JERK_Y;
   settings.max_jerk[Z] = MAX_JERK_Z;
@@ -279,6 +306,11 @@ uint8_t settings_save(void) {
   store.skew_xy = settings.skew_xy;
   store.backlash_z = settings.backlash_z;
   store.backlash_f = settings.backlash_f;
+  store.retract_length = settings.retract_length;
+  store.retract_feedrate = settings.retract_feedrate;
+  store.retract_zlift = settings.retract_zlift;
+  store.recover_extra = settings.recover_extra;
+  store.recover_feedrate = settings.recover_feedrate;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -367,6 +399,16 @@ uint8_t settings_load(void) {
       settings.backlash_z = store.backlash_z;
     if (store.backlash_f <= 1000UL)
       settings.backlash_f = store.backlash_f;
+    if (store.retract_length <= 100000UL)
+      settings.retract_length = store.retract_length;
+    if (store.retract_feedrate >= 60 && store.retract_feedrate <= 60000UL)
+      settings.retract_feedrate = store.retract_feedrate;
+    if (store.retract_zlift >= 0 && store.retract_zlift <= 10000L)
+      settings.retract_zlift = store.retract_zlift;
+    if (store.recover_extra >= -100000L && store.recover_extra <= 100000L)
+      settings.recover_extra = store.recover_extra;
+    if (store.recover_feedrate >= 60 && store.recover_feedrate <= 60000UL)
+      settings.recover_feedrate = store.recover_feedrate;
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
     return 1;
@@ -547,6 +589,21 @@ void settings_report(void) {
         a %= 1000000UL;
       }
     }
+    serial_writechar('\n');
+  #endif
+  #ifdef FIRMWARE_RETRACT
+    serial_writestr("echo:; Retract: S<length> F<units/m> Z<lift>\n");
+    serial_writestr("echo:  M207 S");
+    write_milli2((int32_t)s->retract_length);
+    serial_writestr(" F");
+    write_milli2((int32_t)s->retract_feedrate * 1000);
+    serial_writestr(" Z");
+    write_milli2(s->retract_zlift);
+    serial_writestr("\necho:; Recover: S<length> F<units/m>\n");
+    serial_writestr("echo:  M208 S");
+    write_milli2(s->recover_extra);
+    serial_writestr(" F");
+    write_milli2((int32_t)s->recover_feedrate * 1000);
     serial_writechar('\n');
   #endif
   #ifdef BACKLASH_COMPENSATION
