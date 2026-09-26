@@ -9,6 +9,7 @@
 */
 
 #include "kill.h"
+#include "fans.h"
 #include "arch.h"
 #include "config_wrapper.h"
 #include "serial.h"
@@ -33,6 +34,9 @@ _Noreturn void printer_kill(const char *reason, int16_t id) {
   printer_killed = 1;
 
   heater_emergency_off();
+  #ifdef FANS
+    fans_emergency();           // The hotend is still hot.
+  #endif
   timer_stop();
   unstep();
   queue_flush();

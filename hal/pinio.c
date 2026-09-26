@@ -180,6 +180,21 @@ uint8_t power_is_on(void) {
   return ps_is_on;
 }
 
+uint8_t steppers_enabled(void) {
+  #ifdef STEPPER_ENABLE_PIN
+    uint8_t level = (PIN_PORT(STEPPER_ENABLE_PIN)->ODR &
+                     MASK(PIN_NUM(STEPPER_ENABLE_PIN))) ? 1 : 0;
+
+    #ifdef STEPPER_INVERT_ENABLE
+      return ! level;
+    #else
+      return level;
+    #endif
+  #else
+    return ps_is_on;
+  #endif
+}
+
 void steppers_enable_all(void) {
   power_on();
   stepper_enable();

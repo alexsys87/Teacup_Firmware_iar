@@ -157,6 +157,9 @@ void power_idle(void);
 /// 1 while the supply is switched on.
 uint8_t power_is_on(void);
 
+/// Whether the stepper drivers are enabled (STEPPER_ENABLE_PIN).
+uint8_t steppers_enabled(void);
+
 /// Enable all stepper drivers (M17), switches the PSU on.
 void steppers_enable_all(void);
 

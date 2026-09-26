@@ -27,6 +27,7 @@
 #include "filament.h"
 #include "linear_advance.h"
 #include "input_shaping.h"
+#include "print_stats.h"
 
 #include "atomic.h"
 
@@ -359,6 +360,10 @@ void dda_create(DDA *dda, const TARGET *target) {
     dda->delta[E] = (uint32_t)labs(steps[E]);
     dda->e_direction = (target->axis[E] >= 0)?1:0;
   }
+
+  // Filament used, for the print statistics (M78).
+  if (dda->e_direction && delta_um[E])
+    job_add_filament(delta_um[E]);
 
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
     sersendf_P(("[%ld,%ld,%ld,%ld]"),
@@ -734,11 +739,30 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
     // Steps of all axes are collected and written with one BSRR access
     // per port. The step interrupt ends the pulses later, see timer.c.
     step_set_t steps;
+    uint32_t c = dda->c;
+    #ifdef MULTISTEPPING
+      /**
+        Multi-stepping (like Marlin): at very short step intervals 2, 4 or 8
+        steps per interrupt, the interrupt comes that much less often. Each
+        extra step waits for the pulse and the low time (STEP_PULSE_CYCLES
+        each), so it pays off only when the interrupt takes longer than
+        that, see MULTISTEP_MIN_CYCLES.
+      */
+      uint8_t multi = 1;
 
-    step_set_clear(&steps);
+      while (c < MULTISTEP_MIN_CYCLES && multi < MULTISTEP_MAX) {
+        c <<= 1;
+        multi <<= 1;
+      }
+    #endif
   #endif
 
   #if ! defined ACCELERATION_TEMPORAL
+  #ifdef MULTISTEPPING
+  for (;;) {
+  #endif
+    step_set_clear(&steps);
+
     if (move_state.steps[X]) {
       move_state.counter[X] -= dda->delta[X];
       if (move_state.counter[X] < 0) {
@@ -786,10 +810,26 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
       }
     }
 
-    if (step_set_any(&steps)) {
+    if (step_set_any(&steps))
       step_output(&steps);
-      timer_step_pulse_end();       // Schedule the end of the pulses.
+  #ifdef MULTISTEPPING
+    if (--multi == 0 || move_state.steps[dda->fast_axis] == 0)
+      break;
+    {
+      // Next step in the same interrupt: pulse, low time, then again.
+      uint32_t t0 = DWT->CYCCNT;
+
+      while (DWT->CYCCNT - t0 < STEP_PULSE_CYCLES)
+        ;
+      unstep();
+      t0 = DWT->CYCCNT;
+      while (DWT->CYCCNT - t0 < STEP_PULSE_CYCLES)
+        ;
     }
+  }
+  #endif
+    if (step_set_any(&steps))
+      timer_step_pulse_end();       // Schedule the end of the pulses.
   #endif
 
   #ifdef ACCELERATION_REPRAP
@@ -929,7 +969,10 @@ TEACUP_STEP_RAMFUNC void dda_step(DDA *dda) {
   else {
     psu_timeout = 0;
     #ifndef ACCELERATION_TEMPORAL
-      timer_set(dda->c, 0);
+      #ifdef ACCELERATION_REPRAP
+        c = dda->c;                 // Changed by the ramp above.
+      #endif
+      timer_set(c, 0);              // dda->c, times multi-stepping.
     #endif
   }
 

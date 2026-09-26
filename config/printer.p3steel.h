@@ -55,6 +55,16 @@
 #define ENDSTOP_CLEARANCE_Y      1250
 #define ENDSTOP_CLEARANCE_Z      100
 
+/** \def Z_HOMING_HEIGHT
+  Before homing X or Y (G28, G28 X, G28 Y), Z goes up to this height (mm,
+  Marlin's Z_HOMING_HEIGHT), never down. The nozzle and a BLTouch pin
+  don't drag over the bed or clips then. With Z not homed yet the current
+  Z counts as right (0 after power on). With BLTOUCH G28 Z also homes X
+  and Y first if they aren't (safe Z homing at Z_SAFE_HOMING_X/Y, default
+  the bed center). 0 = off.
+*/
+#define Z_HOMING_HEIGHT          5.0
+
 /** \def X_MIN X_MAX Y_MIN Y_MAX Z_MIN Z_MAX
   Soft axis limits in millimeters. Not defining them disables the check.
 */
@@ -505,6 +515,16 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
   difference is F. 0 = off.
 */
 #define DEFAULT_PID_FAN_FF       0
+
+/** \def HOTEND_FAN_TEMP CONTROLLER_FAN_IDLE
+  Hotend fan (Marlin's EXTRUDER_AUTO_FAN_TEMPERATURE): on at or above this
+  hotend temperature, C, also while cooling down after a print. Keeps the
+  heat break cold, no jams. Controller fan: stays on this many seconds
+  after the drivers were disabled and the heaters went off. Outputs: see
+  PCF8574_ADDRESS in the board file.
+*/
+#define HOTEND_FAN_TEMP          50
+#define CONTROLLER_FAN_IDLE      60
 
 /** \def FAN_KICKSTART_TIME FAN_MIN_PWM
   Part fan: starting from off, full power for FAN_KICKSTART_TIME ms first,

@@ -30,6 +30,17 @@ extern uint32_t cpu_reset_flags;
 
 void cpu_init(void);
 
+/**
+  M997: reboot into the STM32 system bootloader (USB DFU). Sets a marker
+  in RTC backup register 0 and resets; cpu_check_bootloader() at the next
+  start jumps into the bootloader before clocks and watchdog are set up
+  (the independent watchdog can't be stopped once running).
+*/
+_Noreturn void cpu_reboot_to_bootloader(void);
+
+/// Very first thing at startup: enter the bootloader if M997 asked for it.
+void cpu_check_bootloader(void);
+
 /* Interrupt handlers implemented by the firmware (names from the startup
    file's vector table). */
 void HardFault_Handler(void);

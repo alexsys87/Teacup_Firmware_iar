@@ -2,7 +2,8 @@
   \brief Persistent storage in Flash ("EEPROM emulation").
 
   STM32F401/F411 have no EEPROM. The last Flash sector holds settings
-  records, appended one after the other (wear levelling: the sector is
+  records and print statistics records (version FLASH_STORE_STATS),
+  appended one after the other (wear levelling: the sector is
   erased only when full, a 128 kB sector takes several hundred saves).
 
     STM32F401xC (256 kB): sector 5, 0x08020000, 128 kB
@@ -107,20 +108,22 @@ uint32_t flash_store_crc32(const void *data, uint32_t length) {
 
 /**
   Scan the sector.
-  \param last  Word index of the newest valid record header, or -1.
+  \param last  Word index of the newest valid settings record header, or -1.
+  \param last_stats  The same for the statistics record (FLASH_STORE_STATS).
   \param free  Word index of the first erased word after all records, or
                -1 if the rest of the sector is dirty (interrupted write).
 */
-static void scan(int32_t *last, int32_t *free_at) {
+static void scan(int32_t *last, int32_t *last_stats, int32_t *free_at) {
   uint32_t i = 0;
   const uint32_t words = store_size() / 4;
 
   *last = -1;
+  *last_stats = -1;
   *free_at = -1;
 
   while (i + HEADER_WORDS <= words) {
     uint32_t magic = store_word(i);
-    uint32_t len_words;
+    uint32_t header, len_words;
 
     if (magic == ERASED) {
       // Erased header: free space if the header words are all erased.
@@ -131,19 +134,25 @@ static void scan(int32_t *last, int32_t *free_at) {
     if (magic != STORE_MAGIC)
       return;                                   // Dirty, needs erase.
 
-    len_words = ((store_word(i + 1) & 0xFFFFUL) + 3) / 4;
+    header = store_word(i + 1);
+    len_words = ((header & 0xFFFFUL) + 3) / 4;
     if (i + HEADER_WORDS + len_words > words)
       return;
-    *last = (int32_t)i;
+    if ((header >> 16) == FLASH_STORE_STATS)
+      *last_stats = (int32_t)i;
+    else
+      *last = (int32_t)i;
     i += HEADER_WORDS + len_words;
   }
 }
 
 uint8_t flash_store_read(void *data, uint16_t length, uint16_t version) {
-  int32_t last, free_at;
+  int32_t last, last_stats, free_at;
   uint32_t header;
 
-  scan(&last, &free_at);
+  scan(&last, &last_stats, &free_at);
+  if (version == FLASH_STORE_STATS)
+    last = last_stats;
   if (last < 0)
     return 0;
 
@@ -232,8 +241,12 @@ static TEACUP_RAMFUNC uint32_t flash_program(uint8_t erase,
 uint8_t flash_store_write(const void *data, uint16_t length, uint16_t version) {
   // Header + payload, word aligned. Settings are well below 1 kB.
   static uint32_t buf[HEADER_WORDS + 256];
+  // Erasing: the newest record of the other kind (settings / statistics)
+  // is written back first.
+  static uint32_t keep[HEADER_WORDS + 256];
   uint32_t words = HEADER_WORDS + (length + 3U) / 4U;
-  int32_t last, free_at;
+  uint32_t keep_words = 0;
+  int32_t last, last_stats, other, free_at;
   uint8_t erase = 0;
   uint32_t err, i;
   uint32_t primask;
@@ -249,10 +262,19 @@ uint8_t flash_store_write(const void *data, uint16_t length, uint16_t version) {
   for (i = 0; i < length; i++)
     ((uint8_t *)&buf[HEADER_WORDS])[i] = ((const uint8_t *)data)[i];
 
-  scan(&last, &free_at);
+  scan(&last, &last_stats, &free_at);
   if (free_at < 0 || (uint32_t)free_at + words > store_size() / 4) {
     erase = 1;
-    free_at = 0;
+    other = (version == FLASH_STORE_STATS) ? last : last_stats;
+    if (other >= 0) {
+      keep_words = HEADER_WORDS +
+                   ((store_word((uint32_t)other + 1) & 0xFFFFUL) + 3) / 4;
+      if (keep_words > HEADER_WORDS + 256)
+        keep_words = 0;
+      for (i = 0; i < keep_words; i++)
+        keep[i] = store_word((uint32_t)other + i);
+    }
+    free_at = (int32_t)keep_words;
   }
 
   #if defined SPI_FLASH && defined SPI_FLASH_SETTINGS
@@ -261,8 +283,13 @@ uint8_t flash_store_write(const void *data, uint16_t length, uint16_t version) {
 
       (void)primask;
       (void)err;
-      if (erase)
+      if (erase) {
         spi_flash_erase_sector(SPI_SETTINGS_ADDR);
+        if (keep_words) {
+          spi_flash_program(SPI_SETTINGS_ADDR + 4, &keep[1], (keep_words - 1) * 4);
+          spi_flash_program(SPI_SETTINGS_ADDR, &keep[0], 4);
+        }
+      }
       // Magic last, like with internal Flash.
       spi_flash_program(addr + 4, &buf[1], (words - 1) * 4);
       spi_flash_program(addr, &buf[0], 4);
@@ -275,9 +302,15 @@ uint8_t flash_store_write(const void *data, uint16_t length, uint16_t version) {
 
   primask = __get_PRIMASK();
   __disable_irq();
-  err = flash_program(erase,
-                      (volatile uint32_t *)(FLASH_STORE_ADDR + 4UL * (uint32_t)free_at),
-                      buf, words);
+  err = 0;
+  if (erase && keep_words) {
+    err = flash_program(1, (volatile uint32_t *)FLASH_STORE_ADDR, keep, keep_words);
+    erase = 0;
+  }
+  if ( ! err)
+    err = flash_program(erase,
+                        (volatile uint32_t *)(FLASH_STORE_ADDR + 4UL * (uint32_t)free_at),
+                        buf, words);
   __set_PRIMASK(primask);
 
   if (err)

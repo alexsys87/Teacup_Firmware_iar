@@ -2,7 +2,7 @@
   \brief Power loss recovery (M413, M1000), see power_loss.h.
 
   Printing from the SD card or from files in SPI flash, the state of the
-  print is stored in the SPI flash at every layer change (Z goes up, at
+  print is stored in the SPI flash at every layer change (Z changes, at
   most every 2 s) and at least every PLR_INTERVAL seconds.
 
   The movement queue holds many moves read ahead of the one executing, so
@@ -268,7 +268,8 @@ void plr_tick(void) {
     cur = plr_line;
   }
 
-  if ( ! ((cur.pos[Z] > last_z && now - last_save_ms >= 2000) ||
+  // Z changed (layer change; also down: G92 Z0 after homing, Z-hop).
+  if ( ! ((cur.pos[Z] != last_z && now - last_save_ms >= 2000) ||
           now - last_save_ms >= PLR_INTERVAL * 1000UL))
     return;
 

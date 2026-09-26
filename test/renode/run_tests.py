@@ -5,7 +5,7 @@ Builds nothing: expects test/gcc/build_F401_1/teacup.elf (make CHIP=F401
 TEST=1). Drives G-code over USART2, observes UART output and GPIO writes
 (step pulses) and checks the results.
 
-Usage: run_tests.py [renode] [teacup.elf] [platform.repl] [all|basic|safety|proto|cmds|settings|slicer|tune]
+Usage: run_tests.py [renode] [teacup.elf] [platform.repl] [all|basic|safety|proto|cmds|settings|slicer|tune|dfu]
   F401 build: stm32f401.repl (84 MHz), F411 build: stm32f411.repl (96 MHz).
 
 Host port: TEACUP_PORT=usb runs the same tests over the USB CDC port (model
@@ -213,13 +213,30 @@ if want('settings'):
     mark('s_m501'); send('M501\n'); run('0.1')
     m503('s_after501')
     # Reset (M112 + M999): the settings must come back from Flash.
+    # Print job timer: 2 s, paused 1 s, 1 s more. Earlier parts heated with
+    # M109 (timer started): stop it and start from zero statistics.
+    send('M77\n'); run('0.1'); send('M78 S78\n'); run('0.1')
+    mark('j_start'); send('M75\n'); run('2.2')
+    send('M76\n'); run('1.0')
+    mark('j_paused'); send('M31\n'); run('0.1')
+    send('M75\n'); run('1.0')
+    send('M77\n'); run('0.2')
+    mark('j_stopped'); send('M31\nM78\n'); run('0.2')
     mark('s_reset'); send('M112\n'); run('0.1'); send('M999\n'); run('0.5')
     m503('s_after_reset')
-    # Wear levelling: 10 saves in a 1 kB area force an erase.
+    mark('j_after_reset'); send('M78\n'); run('0.1')
+    # Filament counts while the timer runs.
+    send('M75\nG1 E30 F3000\nM400\nM77\n'); run('1.5')
+    mark('j_filament'); send('M78\nG92 E0\n'); run('0.1')
+    # Wear levelling: 10 saves in a 1 kB area force an erase. The
+    # statistics record survives it.
     for k in range(10):
         send('M92 Y%d\nM500\n' % (41 + k)); run('0.1')
+    # A print that never ends (power loss): failed.
+    send('M75\n'); run('0.3')
     mark('s_many_reset'); send('M112\n'); run('0.1'); send('M999\n'); run('0.5')
     m503('s_after_many')
+    mark('j_after_many'); send('M78\n'); run('0.1')
     # Leave defaults behind for the following parts.
     send('M502\nM500\n'); run('0.2')
 
@@ -344,6 +361,13 @@ if want('perf'):
     pin('B', 12, True)
     mark('f_backoff'); run('0.5')
     mark('f_home_pos'); send('M114\n'); run('0.05')
+
+if want('dfu', in_all=False):                # ends the emulated firmware
+    # M997: marker in RTC BKP0R, reset, then the jump into the system
+    # bootloader (0x1FFF0000; Renode has no bootloader ROM there).
+    mark('dfu'); send('M997\n'); run('0.3')
+    cmd('echo "@@BKP0R"'); cmd('sysbus ReadDoubleWord 0x40002850')
+    cmd('echo "@@VTOR"'); cmd('sysbus ReadDoubleWord 0xE000ED08')
 
 if want('tune', in_all=False):               # ~200 s host, not part of 'all'
     # ---------------- PID autotune (2.6), simulated hotend ----------------
@@ -644,6 +668,15 @@ if want('settings'):
           and m503_line('s_after_reset', 'M92').startswith('M92 X80.00')
           and m503_line('s_after_reset', 'M204') == 'M204 P700.00 R3000.00 T800.00',
           (uart('s_reset'), m503_line('s_after_reset', 'M92'), m503_line('s_after_reset', 'M204')))
+    check('M31 while paused: 2 s', 'echo:Print time: 2s' in uart('j_paused'), uart('j_paused'))
+    uj = uart('j_stopped')
+    check('M77, M31: 3 s', 'echo:Print time: 3s' in uj, uj)
+    check('M78: 1 print, finished, 3 s', 'echo:Stats: Prints: 1, Finished: 1, Failed: 0' in uj
+          and 'echo:Stats: Total time: 3s, Longest job: 3s' in uj and 'echo:Stats: Filament used: 0.00m' in uj, uj)
+    check('  statistics survive a reset', 'echo:Stats: Prints: 1, Finished: 1, Failed: 0' in uart('j_after_reset'), uart('j_after_reset'))
+    check('  ... and the erase of the full sector; unfinished print failed',
+          'echo:Stats: Prints: 3, Finished: 2, Failed: 1' in uart('j_after_many'), uart('j_after_many'))
+    check('  filament used while the timer runs: 30 mm', 'echo:Stats: Filament used: 0.03m' in uart('j_filament'), uart('j_filament'))
     check('10 saves (erase), newest survives reset', m503_line('s_after_many', 'M92') == 'M92 X80.00 Y50.00 Z320.00 E96.27',
           m503_line('s_after_many', 'M92'))
 
@@ -690,6 +723,7 @@ if want('perf'):
              int(m.group(7)) == (0 if STEP_TIMERS else int(m.group(1)))
     check('M9001: every step gets a pulse end', ok, st)
     check('  late steps', bool(m) and int(m.group(6)) == 0, m.group(6) if m else None)
+    check('  multi-stepping setting reported', any(l.startswith('echo:Multi-stepping:') for l in uart('f_stats')), uart('f_stats'))
     nx = pulses('f_move', 'A', 10)
     rx = 0
     for l in sections.get('f_move', []):
@@ -725,6 +759,15 @@ if want('perf'):
     check('endstop interrupt: stop within decel distance', 30 <= after <= 44, after)
     ph = pos('f_home_pos')
     check('  homing completes, X=0', ph is not None and ph[0] == 0.0, ph)
+
+if want('dfu', in_all=False):
+    print('--- M997 ---')
+    check('M997: message, then reset', 'echo:Rebooting into the DFU bootloader' in uart('dfu'), uart('dfu'))
+    vals = dict(re.findall(r'@@(BKP0R|VTOR)\s*\n\s*(0x[0-9A-Fa-f]+)', out))
+    # (Renode's SYSCFG doesn't keep MEMRMP, so it isn't checked.) VTOR
+    # 0x1FFF0000 is set only after reading the marker at startup.
+    check('  bootloader entered: marker read and cleared, VTOR 0x1FFF0000',
+          int(vals.get('BKP0R', '1'), 16) == 0 and int(vals.get('VTOR', '0'), 16) == 0x1FFF0000, vals)
 
 if want('tune', in_all=False):
     print('--- PID autotune ---')

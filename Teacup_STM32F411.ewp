@@ -2332,6 +2332,12 @@
         <file>
             <name>$PROJ_DIR$\core\power_loss.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\fans.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\core\print_stats.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>

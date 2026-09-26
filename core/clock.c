@@ -22,6 +22,7 @@
 #include "gcode_queue.h"
 #include "filament.h"
 #include "babystep.h"
+#include "fans.h"
 
 /**
   If the specific bit is set, execute the following block exactly once
@@ -104,6 +105,9 @@ static void clock_250ms(void) {
   }
 
   temp_heater_tick();
+  #ifdef FANS
+    fans_tick();
+  #endif
 
   ifclock(clock_flag_1s) {
     static uint8_t wait_for_temp = 0;
@@ -173,6 +177,9 @@ static void clock_10ms(void) {
   soft_pwm_tick();
   #ifdef HEATER_FAN
     fan_tick();
+  #endif
+  #ifdef PCF8574_ADDRESS
+    expander_tick();
   #endif
   filament_tick();
   babystep_tick();

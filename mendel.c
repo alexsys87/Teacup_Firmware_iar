@@ -30,6 +30,8 @@
 #include "probe.h"
 #include "host_watch.h"
 #include "power_loss.h"
+#include "fans.h"
+#include "print_stats.h"
 
 #ifdef CANNED_CYCLE
   static const char canned_gcode_P[] = CANNED_CYCLE;
@@ -43,6 +45,9 @@
 static void init(void) {
 
   __disable_irq();
+
+  // M997: into the DFU bootloader instead of the firmware.
+  cpu_check_bootloader();
 
   // Clocks first, everything else depends on them.
   cpu_init();
@@ -120,6 +125,14 @@ static void init(void) {
     probe_init();
   #endif
 
+  // Print statistics (M78).
+  job_init();
+
+  // Hotend and controller fans.
+  #ifdef FANS
+    fans_init();
+  #endif
+
   // An interrupted SD / flash print? Tell the host (M1000 resumes).
   #ifdef POWER_LOSS_RECOVERY
     plr_init();
@@ -170,6 +183,8 @@ int main(void) {
       // File print: store the state at layer changes.
       plr_tick();
     #endif
+    // Print job timer: stop after the last move, store the statistics.
+    job_tick();
 
     // If the movement queue is full, a move command would block. Wait.
     if (queue_full() == 0) {
@@ -190,6 +205,7 @@ int main(void) {
               #ifdef POWER_LOSS_RECOVERY
                 plr_file_done();
               #endif
+              job_stop_idle();
             }
             gcode_active = GCODE_SOURCE_INIT;
           }

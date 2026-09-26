@@ -115,6 +115,26 @@ void home(void) {
 void home_none(void) {
 }
 
+void home_lift_z(void) {
+  #if defined Z_HOMING_HEIGHT && (defined Z_MIN_PIN || defined Z_MAX_PIN)
+    const int32_t lift = (int32_t)(Z_HOMING_HEIGHT * 1000.);
+    TARGET t;
+
+    // Like Marlin: up to the height, never down. With Z not homed the
+    // current Z is assumed right (0 after power on), so repeated homing of
+    // X or Y doesn't lift again and again.
+    queue_wait();
+    if (lift <= 0 || startpoint.axis[Z] >= lift)
+      return;
+    t = startpoint;
+    t.axis[Z] = lift;
+    t.F = settings.max_feedrate[Z];
+    t.f_multiplier = 256;
+    enqueue(&t);
+    queue_wait();
+  #endif
+}
+
 /// find X MIN endstop
 void home_x_negative(void) {
   #if defined X_MIN_PIN
