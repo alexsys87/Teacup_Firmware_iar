@@ -8,6 +8,16 @@
 #include "dda.h"
 
 
+/**
+  Take the kinematics settings (M852 skew). Call dda_new_startpoint()
+  afterwards, the motor positions change.
+*/
+void kinematics_update(void);
+
+#ifdef SKEW_CORRECTION
+  extern float skew_xy_factor;
+#endif
+
 void carthesian_to_carthesian(const TARGET *startpoint, const TARGET *target,
                               axes_uint32_t delta_um, axes_int32_t steps);
 

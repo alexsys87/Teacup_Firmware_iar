@@ -151,6 +151,25 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define INPUT_SHAPING_TYPE_Y     1
 #define S_CURVE_TIME             0
 
+/** \def SKEW_CORRECTION XY_SKEW_FACTOR
+  XY skew correction (M852 I, like Marlin): a frame that isn't exactly
+  square prints squares as rhombs. XY_SKEW_FACTOR is the tangent of the
+  error angle, motor X = X - Y * factor; 0 = off. Print a square, measure
+  its diagonals AC (front left to back right) and BD (front right to back
+  left): factor = (AC^2 - BD^2) / (AC^2 + BD^2). A few multiplications
+  per move.
+*/
+#define SKEW_CORRECTION
+#define XY_SKEW_FACTOR           0.0
+
+/** \def BACKLASH_COMPENSATION BACKLASH_Z
+  Z backlash compensation (M425 Z F, like Marlin): M5 threaded rods with
+  plain nuts have 0.05..0.2 mm play. When Z reverses, that many extra
+  steps take it up. BACKLASH_Z in mm, 0 = off.
+*/
+#define BACKLASH_COMPENSATION
+#define BACKLASH_Z               0.0
+
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,
@@ -378,24 +397,65 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 /** \def BANG_BANG_BED BANG_BANG_BED_HYSTERESIS BANG_BANG_BED_ON
   Bed only on/off (Marlin without PIDTEMPBED, MAX_BED_POWER 255): on below
   target - hysteresis, off above target + hysteresis. Degree Celsius.
+  Off: the bed runs PID (M304) with slow software PWM on PB0, see
+  DEFINE_HEATER() in the board file. It holds about +-0.3 C instead of
+  +-2 C, no "breathing" of the bed in Z, no big load steps on the PSU.
 */
-#define BANG_BANG_BED
+//#define BANG_BANG_BED
 #define BANG_BANG_BED_HYSTERESIS 2
 #define BANG_BANG_BED_ON         255
 
 /** \def DEFAULT_P DEFAULT_I DEFAULT_D DEFAULT_I_LIMIT
   Hotend PID from Marlin: Kp 22.2, Ki 1.08, Kd 114. Conversion to Teacup
-  units (PID runs every 250 ms on quarter degrees, PID_SCALE 1024):
-    P = Kp * 256, I = Ki * 64, D = Kd * 128.
+  units: P = Kp * 256, I = Ki * 64, D = Kd * 128. The PID runs in floating
+  point every 100 ms and takes these as Marlin's Kp, Ki (per second) and
+  Kd (seconds), so values from Marlin or M303 fit directly.
   I_LIMIT allows the integral term the full output range (255 * 1024 / I).
-  Runtime tuning (heater index in P): M130 S<Kp/4>, M131 S<Ki/16>,
-  M132 S<Kd/8>, M133 S<I limit>.
+  Runtime tuning: M301 P I D (Marlin units), M130..M133 (Teacup units).
   Marlin's PID_ADD_EXTRUSION_RATE has no equivalent.
 */
 #define DEFAULT_P                ((int32_t)(22.2 * 256))   // 5683
 #define DEFAULT_I                ((int32_t)(1.08 * 64))    // 69
 #define DEFAULT_D                ((int32_t)(114.0 * 128))  // 14592
 #define DEFAULT_I_LIMIT          (255L * 1024 / DEFAULT_I) // 3784
+
+/** \def DEFAULT_BED_P DEFAULT_BED_I DEFAULT_BED_D DEFAULT_BED_I_LIMIT
+  Bed PID (without BANG_BANG_BED), same units. A start for a 12 V MK2a /
+  MK2B bed (Marlin's Kp 70, Ki 1.5, Kd 800); tune yours with
+  M303 E-1 S60 C8 U1, then M500.
+*/
+#define DEFAULT_BED_P            ((int32_t)(70.0 * 256))   // 17920
+#define DEFAULT_BED_I            ((int32_t)(1.5 * 64))     // 96
+#define DEFAULT_BED_D            ((int32_t)(800.0 * 128))  // 102400
+#define DEFAULT_BED_I_LIMIT      (255L * 1024 / DEFAULT_BED_I) // 2720
+
+/** \def PID_D_FILTER PID_D_FILTER_BED PID_FUNCTIONAL_RANGE
+  Time constant of the D term filter, seconds, for the hotend and the bed.
+  Farther than PID_FUNCTIONAL_RANGE degrees from the target the heater is
+  full on or off, the integral term starts over (Marlin's
+  PID_FUNCTIONAL_RANGE).
+*/
+#define PID_D_FILTER             2.0f
+#define PID_D_FILTER_BED         5.0f
+#define PID_FUNCTIONAL_RANGE     10.0f
+
+/** \def DEFAULT_PID_FAN_FF
+  Hotend feed-forward for the part fan (M301 F, Marlin's PID_FAN_SCALING):
+  PWM counts (0..255) the heater gets more at M106 S255, proportionally
+  less at lower speeds. Without it the hotend drops 3..5 C when the fan
+  starts after the first layers. To find it: hold the print temperature,
+  note the mean hotend PWM (M105 @:) with the fan off and at S255, the
+  difference is F. 0 = off.
+*/
+#define DEFAULT_PID_FAN_FF       0
+
+/** \def FAN_KICKSTART_TIME FAN_MIN_PWM
+  Part fan: starting from off, full power for FAN_KICKSTART_TIME ms first,
+  so M106 S40 spins it up, too. M106 S1..255 maps to FAN_MIN_PWM..255, the
+  lowest speed doesn't stall. 0 = off.
+*/
+#define FAN_KICKSTART_TIME       200
+#define FAN_MIN_PWM              40
 
 /** \def MOVEBUFFER_SIZE
   Move buffer size, in number of moves. Look-ahead plans over the whole

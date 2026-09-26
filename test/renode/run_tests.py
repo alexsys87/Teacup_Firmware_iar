@@ -34,6 +34,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 FORCE = sym('temp_dummy_force')
 STATUS_MSG = sym('status_msg')
 PLANT = sym('temp_dummy_plant')
+FANLOSS = sym('temp_dummy_fan_loss')
 # Linear advance and input shaping step E, X, Y on their own
 # (motion/linear_advance.c, motion/input_shaping.c).
 STEP_AUX = sym('la_service') != 0 or sym('shaper_service') != 0
@@ -99,12 +100,15 @@ if want('basic'):
     pin('B', 12, True); run('0.5')
     mark('m114_home'); send('M114\n'); run('0.05')
 
-    # Fan / heater output via M106 on the hardware PWM heater (TIM4 CH3, PB8).
-    mark('m106'); send('M106 P0 S128\n'); run('0.05')
+    # Hardware PWM heater (TIM4 CH3, PB8): 70 C below the target the PID
+    # gives full power. (M106 P0 would last until the next PID run only,
+    # 100 ms at most; the PWM scaling is checked with the fan, TIM4 CH4.)
+    mark('m106'); send('M104 S100\n'); run('0.3')
     cmd('echo "@@TIM4 CCR3"')
     cmd('sysbus ReadDoubleWord 0x4000083C')
     cmd('echo "@@TIM4 ARR"')
     cmd('sysbus ReadDoubleWord 0x4000082C')
+    send('M104 S0\n'); run('0.05')
     mark('end')
 
 def cs(text):                            # add a checksum, like hosts do
@@ -158,8 +162,13 @@ if want('cmds'):
     mark('c_m109_cancel_start'); send('M109 S200\n'); run('1.0')
     mark('c_m109_cancel'); send('M108\n'); run('1.2')
     send('M104 S0\n'); run('0.05')
-    mark('c_m106'); send('M106 S200\n'); run('0.05'); read32('CCR4_ON', 0x40000840)
+    # Part fan: kick-start 100 ms at full power, S1..255 -> PWM 20..255.
+    mark('c_m106'); send('M106 S200\n'); run('0.05'); read32('CCR4_KICK', 0x40000840)
+    run('0.1'); read32('CCR4_ON', 0x40000840)
+    send('M106 S100\n'); run('0.02'); read32('CCR4_LOWER', 0x40000840)
     mark('c_m107'); send('M107\n'); run('0.05'); read32('CCR4_OFF', 0x40000840)
+    send('M106 S1\n'); run('0.15'); read32('CCR4_MIN', 0x40000840)
+    send('M107\n'); run('0.05')
     mark('c_m17'); send('M17\n'); run('0.05'); read32('ODR_M17', 0x40020014)
     mark('c_m84'); send('M84\n'); run('0.05'); read32('ODR_M84', 0x40020014)
     mark('c_m84s'); send('M84 S2\nM17\n'); run('0.05'); read32('ODR_IDLE0', 0x40020014)
@@ -194,7 +203,7 @@ if want('settings'):
     mark('s_m203'); send('M203 X5\nG1 X20 F6000\n'); run('1.0')
     mark('s_m203_mid'); send('M114\n'); run('1.5')
     send('M203 X100\n'); run('0.05')
-    mark('s_set'); send('M204 S500\nM205 X15\nM201 Z80\nM301 P10 I0.5 D50\n'); run('0.1')
+    mark('s_set'); send('M204 S500\nM205 X15\nM201 Z80\nM301 P10 I0.5 D50 F12.5\n'); run('0.1')
     m503('s_changed')
     mark('s_m204'); send('M204 P700 R3000\nM204 T800\n'); run('0.1')
     m503('s_m204_changed')
@@ -345,6 +354,17 @@ if want('tune', in_all=False):               # ~200 s host, not part of 'all'
     mark('t_hold'); send('M104 S100\n'); run('40.0')
     for k in range(5):
         mark('t_hold_%d' % k); send('M105\n'); run('2.0')
+    # Part fan: 1.2 C/s extra loss at full speed, 0.3 C/s at S64. Feed-
+    # forward F = 1.2 / 4 * 255 = 76.5 counts. Once without (the dip), once
+    # with it, each from a settled hotend.
+    cmd('sysbus WriteDoubleWord 0x%08X 1200' % FANLOSS)
+    for ff in (0, 76.5):
+        send('M301 F%g\n' % ff); run('20.0')
+        mark('t_fan_%g' % ff); send('M106 S255\n')
+        for k in range(30):
+            send('M105\n'); run('0.5')
+        mark('t_fan_end_%g' % ff); send('M107\n'); run('0.1')
+    cmd('sysbus WriteDoubleWord 0x%08X 0' % FANLOSS)
     send('M104 S0\n'); run('0.1')
     cmd('sysbus WriteDoubleWord 0x%08X 0' % PLANT)
 
@@ -478,7 +498,7 @@ if want('basic'):
     if PORT == 'usb':
         check('usb: answers not on the UART', serial0('m115') == [] and serial0('burst') == [],
               serial0('m115') + serial0('burst'))
-    check('m105 initial temp (ok T:..)', 'ok T:25.0/0.0' in uart('m105'), uart('m105'))
+    check('m105 initial temp (ok T:..)', 'ok T:25.0/0.0 @:0' in uart('m105'), uart('m105'))
     check('m119 endstop open', any('x_min:open' in l for l in uart('m119_open')), uart('m119_open'))
     check('m119 endstop triggered', any('x_min:triggered' in l for l in uart('m119_trig')), uart('m119_trig'))
     n = pulses('move_x', 'A', 10) + pulses('m114_mid', 'A', 10)
@@ -503,7 +523,7 @@ if want('basic'):
     check('no reset (watchdog/fault)', first.count('] start') == 1, first.count('] start'))
     vals = re.findall(r'@+TIM4 (\w+)\s*\n\s*(0x[0-9A-Fa-f]+)', out)
     d = {k: int(v, 16) for k, v in vals}
-    check('M106 S128 -> PWM 50 %', d.get('ARR') == 1019 and d.get('CCR3') == 128 * 256 * 1020 // (255 * 256), d)
+    check('heater PWM TIM4 CH3: full power far below target', d.get('ARR') == 1019 and d.get('CCR3') == 1020, d)
 if want('proto'):
     print('--- host protocol / command queue ---')
     r = uart_raw('p_m110')
@@ -514,7 +534,7 @@ if want('proto'):
     check('wrong line number -> Resend: 2', uart('p_badn') == ['Error:Line Number is not Last Line Number+1, Last Line: 1', 'Resend: 2', 'ok'], uart('p_badn'))
     check('N without checksum -> Resend: 2', uart('p_nocs') == ['Error:No Checksum with line number, Last Line: 1', 'Resend: 2', 'ok'], uart('p_nocs'))
     check('checksum without N -> Resend: 2', uart('p_csnon') == ['Error:No Line Number with checksum, Last Line: 1', 'Resend: 2', 'ok'], uart('p_csnon'))
-    M105_OK = re.compile(r'^ok T:[\d.]+/[\d.]+$')
+    M105_OK = re.compile(r'^ok T:[\d.]+/[\d.]+ @:\d+$')
     check('resent line accepted, M105 one line', len(uart('p_resend')) == 1 and M105_OK.match(uart('p_resend')[0]), uart('p_resend'))
     r = uart_raw('p_after110')
     check('M110 N100 -> N101 accepted', any(l.startswith('X:') for l in r) and any(re.match(r'^ok N101 ', l) for l in r), r)
@@ -552,7 +572,11 @@ if want('cmds'):
         m = re.search(r'@+%s.*?OutputData\), returned (0x[0-9A-Fa-f]+)' % tag, out, re.S)
         if m:
             v[tag] = int(m.group(1), 16)
-    check('M106 S200 / M107 (fan, TIM4 CH4)', v.get('CCR4_ON', 0) == 200 * 256 * 1020 // (255 * 256) and v.get('CCR4_OFF', 1) == 0, (v.get('CCR4_ON'), v.get('CCR4_OFF')))
+    fan_ccr = lambda s: (20 + (s * 235 + 127) // 255) * 256 * 1020 // (255 * 256)
+    check('M106 S200 / M107 (fan, TIM4 CH4)', v.get('CCR4_ON', 0) == fan_ccr(200) and v.get('CCR4_OFF', 1) == 0, (v.get('CCR4_ON'), v.get('CCR4_OFF')))
+    check('  kick-start: full power first', v.get('CCR4_KICK', 0) == 1020, v.get('CCR4_KICK'))
+    check('  running fan: new speed at once', v.get('CCR4_LOWER', 0) == fan_ccr(100), v.get('CCR4_LOWER'))
+    check('  M106 S1: minimum PWM 20', v.get('CCR4_MIN', 0) == fan_ccr(1), (v.get('CCR4_MIN'), fan_ccr(1)))
     check('M17 enables (PA9 low)', (v.get('ODR_M17', 0xFFFF) >> 9) & 1 == 0, hex(v.get('ODR_M17', 0)))
     check('M84 disables (PA9 high)', (v.get('ODR_M84', 0) >> 9) & 1 == 1, hex(v.get('ODR_M84', 0)))
     check('M84 S2: idle timeout disables', (v.get('ODR_IDLE0', 0xFFFF) >> 9) & 1 == 0 and (v.get('ODR_IDLE1', 0) >> 9) & 1 == 1,
@@ -604,7 +628,7 @@ if want('settings'):
     check('M204/M205/M201/M301 reported', m503_line('s_changed', 'M204') == 'M204 P500.00 R1000.00 T500.00'
           and m503_line('s_changed', 'M205').startswith('M205 X15.00')
           and m503_line('s_changed', 'M201').endswith('Z80.00 E1000.00')
-          and m503_line('s_changed', 'M301') == 'M301 P10.00 I0.50 D50.00', c)
+          and m503_line('s_changed', 'M301') == 'M301 P10.00 I0.50 D50.00 F12.50', c)
     check('M204 P R T set separately', m503_line('s_m204_changed', 'M204') == 'M204 P700.00 R3000.00 T800.00',
           m503_line('s_m204_changed', 'M204'))
     check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('s_m500')), uart('s_m500'))
@@ -612,7 +636,7 @@ if want('settings'):
           and m503_line('s_after502', 'M92').startswith('M92 X40.00'), m503_line('s_after502', 'M92'))
     check('M501 loads', any('Stored settings retrieved' in l for l in uart('s_m501'))
           and m503_line('s_after501', 'M92').startswith('M92 X80.00')
-          and m503_line('s_after501', 'M301') == 'M301 P10.00 I0.50 D50.00'
+          and m503_line('s_after501', 'M301') == 'M301 P10.00 I0.50 D50.00 F12.50'
           and m503_line('s_after501', 'M204') == 'M204 P700.00 R3000.00 T800.00',
           (m503_line('s_after501', 'M92'), m503_line('s_after501', 'M204')))
     # Boot messages: UART only (USB isn't enumerated yet at boot).
@@ -719,6 +743,13 @@ if want('tune', in_all=False):
             m = re.match(r'ok T:([\d.]+)/', l)
             if m: temps.append(float(m.group(1)))
     check('tuned PID holds 100 C (+-2)', len(temps) == 5 and all(abs(t - 100) <= 2.0 for t in temps), temps)
+    dips = {}
+    for ff in (0, 76.5):
+        t = [float(m.group(1)) for l in uart('t_fan_%g' % ff)
+             for m in [re.match(r'ok T:([\d.]+)/', l)] if m]
+        dips[ff] = (100 - min(t)) if t else 99
+    check('fan on: hotend dips without feed-forward (> 1.5 C)', dips[0] > 1.5, dips)
+    check('  M301 F: dip below 0.5 C', dips[76.5] < 0.5, dips)
 
 if want('safety'):
     print('--- safety ---')

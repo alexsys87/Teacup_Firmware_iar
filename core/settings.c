@@ -7,8 +7,9 @@
 
   Stored: steps per mm, max. feedrates, max. accelerations, accelerations
   for printing, retracts and travel, linear advance K, input shaping and
-  S-curve,
-  jerk, home offsets, PID values of all heaters, stepper idle timeout,
+  S-curve, XY skew (M852), Z backlash (M425),
+  jerk, home offsets, PID values of all heaters and the part fan
+  feed-forward (M301 F), stepper idle timeout,
   Z offset (M290), probe offset (M851), filament runout (M412), bed
   leveling mesh and state (G29, M420, M421). The layout is the same with
   or without these features, so a stored record survives option changes.
@@ -20,6 +21,7 @@
 #include <string.h>
 #include "config_wrapper.h"
 #include "dda_maths.h"
+#include "dda_kinematics.h"
 #include "dda_queue.h"
 #include "heater.h"
 #include "home.h"
@@ -36,8 +38,8 @@
 #include "input_shaping.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except versions 1 to 4, which get converted.
-#define SETTINGS_VERSION 5
+/// except versions 1 to 5, which get converted.
+#define SETTINGS_VERSION 6
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -56,6 +58,12 @@
 #endif
 #ifndef ACCELERATION_TRAVEL
   #define ACCELERATION_TRAVEL ACCELERATION
+#endif
+#ifndef XY_SKEW_FACTOR
+  #define XY_SKEW_FACTOR 0.0
+#endif
+#ifndef BACKLASH_Z
+  #define BACKLASH_Z 0.0
 #endif
 #ifndef MAX_JERK_X
   #define MAX_JERK_X 0
@@ -115,6 +123,15 @@ typedef struct {
   uint32_t   is_damp[2];
   uint32_t   is_type[2];
   uint32_t   s_curve_us;
+} settings_store_v5_t;
+
+/// Version 6: version 5 plus fan feed-forward, skew, backlash.
+typedef struct {
+  settings_store_v5_t v5;
+  uint32_t   pid_fan_ff;        ///< M301 F, 1/100 PWM counts.
+  int32_t    skew_xy;           ///< M852 I, millionths.
+  uint32_t   backlash_z;        ///< M425 Z, um.
+  uint32_t   backlash_f;        ///< M425 F, 1/1000.
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -151,6 +168,10 @@ void settings_defaults(void) {
   settings.is_type[0] = INPUT_SHAPING_TYPE_X;
   settings.is_type[1] = INPUT_SHAPING_TYPE_Y;
   settings.s_curve_us = (uint32_t)(S_CURVE_TIME * 1000. + 0.5);
+  settings.skew_xy = (int32_t)(XY_SKEW_FACTOR * 1000000. +
+                               (XY_SKEW_FACTOR < 0 ? -0.5 : 0.5));
+  settings.backlash_z = (uint32_t)(BACKLASH_Z * 1000. + 0.5);
+  settings.backlash_f = 1000;
   settings.max_jerk[X] = MAX_JERK_X;
   settings.max_jerk[Y] = MAX_JERK_Y;
   settings.max_jerk[Z] = MAX_JERK_Z;
@@ -176,6 +197,7 @@ void settings_defaults(void) {
 
 void settings_apply(void) {
   dda_maths_update();
+  kinematics_update();
   #ifdef INPUT_SHAPING
     shaper_configure();
   #endif
@@ -220,7 +242,8 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
-  settings_store_v2_t *v2 = &store.v4.v3.v2;
+  settings_store_v5_t *v5 = &store.v5;
+  settings_store_v2_t *v2 = &store.v5.v4.v3.v2;
   uint8_t a;
 
   memset(&store, 0, sizeof(store));
@@ -243,15 +266,19 @@ uint8_t settings_save(void) {
   #ifdef BED_LEVELING
     v2->mesh = mesh;
   #endif
-  store.v4.v3.accel_retract = settings.accel_retract;
-  store.v4.v3.accel_travel = settings.accel_travel;
-  store.v4.la_k = settings.la_k;
+  v5->v4.v3.accel_retract = settings.accel_retract;
+  v5->v4.v3.accel_travel = settings.accel_travel;
+  v5->v4.la_k = settings.la_k;
   for (a = 0; a < 2; a++) {
-    store.is_freq[a] = settings.is_freq[a];
-    store.is_damp[a] = settings.is_damp[a];
-    store.is_type[a] = settings.is_type[a];
+    v5->is_freq[a] = settings.is_freq[a];
+    v5->is_damp[a] = settings.is_damp[a];
+    v5->is_type[a] = settings.is_type[a];
   }
-  store.s_curve_us = settings.s_curve_us;
+  v5->s_curve_us = settings.s_curve_us;
+  store.pid_fan_ff = pid_get_fan_ff();
+  store.skew_xy = settings.skew_xy;
+  store.backlash_z = settings.backlash_z;
+  store.backlash_f = settings.backlash_f;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -307,24 +334,39 @@ static void load_v4(const settings_store_v4_t *v4) {
     settings.la_k = v4->la_k;
 }
 
-uint8_t settings_load(void) {
-  static settings_store_t store;
-  settings_store_v4_t *v4 = &store.v4;
-  settings_store_v3_t *v3 = &store.v4.v3;
+/// Version 5 part from the store.
+static void load_v5(const settings_store_v5_t *v5) {
   uint8_t a;
 
+  load_v4(&v5->v4);
+  for (a = 0; a < 2; a++) {
+    if (v5->is_freq[a] <= 50000UL)            // Up to 500 Hz.
+      settings.is_freq[a] = v5->is_freq[a];
+    if (v5->is_damp[a] < 1000UL)
+      settings.is_damp[a] = v5->is_damp[a];
+    if (v5->is_type[a] <= 1)
+      settings.is_type[a] = v5->is_type[a];
+  }
+  if (v5->s_curve_us <= 100000UL)
+    settings.s_curve_us = v5->s_curve_us;
+}
+
+uint8_t settings_load(void) {
+  static settings_store_t store;
+  settings_store_v5_t *v5 = &store.v5;
+  settings_store_v4_t *v4 = &store.v5.v4;
+  settings_store_v3_t *v3 = &store.v5.v4.v3;
+
   if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    load_v4(v4);
-    for (a = 0; a < 2; a++) {
-      if (store.is_freq[a] <= 50000UL)          // Up to 500 Hz.
-        settings.is_freq[a] = store.is_freq[a];
-      if (store.is_damp[a] < 1000UL)
-        settings.is_damp[a] = store.is_damp[a];
-      if (store.is_type[a] <= 1)
-        settings.is_type[a] = store.is_type[a];
-    }
-    if (store.s_curve_us <= 100000UL)
-      settings.s_curve_us = store.s_curve_us;
+    load_v5(v5);
+    if (store.pid_fan_ff <= 25500UL)
+      pid_set_fan_ff(store.pid_fan_ff);
+    if (store.skew_xy >= -100000L && store.skew_xy <= 100000L)
+      settings.skew_xy = store.skew_xy;
+    if (store.backlash_z <= 5000UL)
+      settings.backlash_z = store.backlash_z;
+    if (store.backlash_f <= 1000UL)
+      settings.backlash_f = store.backlash_f;
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
     return 1;
@@ -332,6 +374,11 @@ uint8_t settings_load(void) {
 
   // Older records without the new fields? Take what's there, the new
   // fields keep their values.
+  if (flash_store_read(v5, sizeof(*v5), 5)) {
+    load_v5(v5);
+    report_old(v5, sizeof(*v5));
+    return 1;
+  }
   if (flash_store_read(v4, sizeof(*v4), 4)) {
     load_v4(v4);
     report_old(v4, sizeof(*v4));
@@ -407,6 +454,12 @@ static void report_pid(const char *cmd, heater_t h) {
   serial_writestr(" P"); write_milli2((int32_t)(((int64_t)p * 1000) / 256));
   serial_writestr(" I"); write_milli2((int32_t)(((int64_t)i * 1000) / 64));
   serial_writestr(" D"); write_milli2((int32_t)(((int64_t)d * 1000) / 128));
+  #if defined HEATER_EXTRUDER && defined HEATER_FAN
+    if (h == HEATER_EXTRUDER) {
+      serial_writestr(" F");
+      write_milli2((int32_t)pid_get_fan_ff() * 10);
+    }
+  #endif
   serial_writechar('\n');
 }
 
@@ -471,6 +524,38 @@ void settings_report(void) {
     }
     serial_writechar('\n');
   }
+  #endif
+
+  #ifdef SKEW_CORRECTION
+    serial_writestr("echo:; Skew factor XY (tangent):\n");
+    serial_writestr("echo:  M852 I");
+    {
+      int32_t k = s->skew_xy;
+      uint32_t a;
+      uint8_t n;
+
+      if (k < 0) {
+        serial_writechar('-');
+        k = -k;
+      }
+      a = (uint32_t)k;
+      serwrite_uint32(a / 1000000UL);
+      serial_writechar('.');
+      for (n = 0, a %= 1000000UL; n < 6; n++) {
+        a *= 10;
+        serial_writechar((char)('0' + a / 1000000UL));
+        a %= 1000000UL;
+      }
+    }
+    serial_writechar('\n');
+  #endif
+  #ifdef BACKLASH_COMPENSATION
+    serial_writestr("echo:; Backlash compensation: F<fraction> Z<mm>\n");
+    serial_writestr("echo:  M425 F");
+    write_milli2((int32_t)s->backlash_f);
+    serial_writestr(" Z");
+    write_milli2((int32_t)s->backlash_z);
+    serial_writechar('\n');
   #endif
 
   serial_writestr("echo:; Advanced: X<max_x_jerk> Y<max_y_jerk> Z<max_z_jerk> E<max_e_jerk>\n");

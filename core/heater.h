@@ -27,6 +27,56 @@
   #define DEFAULT_I_LIMIT   384
 #endif
 
+/** \def DEFAULT_BED_P DEFAULT_BED_I DEFAULT_BED_D DEFAULT_BED_I_LIMIT
+  PID defaults of the bed (HEATER_BED), same units. Default: same as the
+  other heaters.
+*/
+#ifndef DEFAULT_BED_P
+  #define DEFAULT_BED_P       DEFAULT_P
+  #define DEFAULT_BED_I       DEFAULT_I
+  #define DEFAULT_BED_D       DEFAULT_D
+  #define DEFAULT_BED_I_LIMIT DEFAULT_I_LIMIT
+#endif
+
+/** \def DEFAULT_PID_FAN_FF
+  Feed-forward of the hotend PID for the part fan (M301 F): PWM counts
+  (0..255) the heater needs more with the fan at full speed, applied in
+  proportion to M106 S. 0 = off.
+*/
+#ifndef DEFAULT_PID_FAN_FF
+  #define DEFAULT_PID_FAN_FF    0
+#endif
+
+/** \def PID_D_FILTER PID_D_FILTER_BED PID_FUNCTIONAL_RANGE
+  PID_D_FILTER: time constant of the low pass filter of the D term,
+  seconds, PID_D_FILTER_BED the same for the bed (its Kd is much larger,
+  so is the noise). PID_FUNCTIONAL_RANGE: farther than this many degrees
+  below the target the heater runs at full power, above it's off (like
+  Marlin).
+*/
+#ifndef PID_D_FILTER
+  #define PID_D_FILTER          2.0f
+#endif
+#ifndef PID_D_FILTER_BED
+  #define PID_D_FILTER_BED      5.0f
+#endif
+#ifndef PID_FUNCTIONAL_RANGE
+  #define PID_FUNCTIONAL_RANGE  10.0f
+#endif
+
+/** \def FAN_KICKSTART_TIME FAN_MIN_PWM
+  Part fan (HEATER_FAN): starting from off it runs at full power for
+  FAN_KICKSTART_TIME ms first, so it spins up at low speeds, too. M106
+  S1..255 maps to FAN_MIN_PWM..255, the fan doesn't stall at low speeds.
+  0 = off (like Marlin's FAN_KICKSTART_TIME and FAN_MIN_PWM).
+*/
+#ifndef FAN_KICKSTART_TIME
+  #define FAN_KICKSTART_TIME    0
+#endif
+#ifndef FAN_MIN_PWM
+  #define FAN_MIN_PWM           0
+#endif
+
 /** \def HEATER_THRESHOLD
 
   Defines the threshold when to turn a non-PWM heater on and when to turn it
@@ -83,6 +133,10 @@ typedef struct {
   /// sigma delta values for software pwm
   int16_t sd_accu;
   int16_t sd_dir;
+  /// Slow software PWM: position in the period, on time of this period,
+  /// both in 10 ms ticks.
+  uint8_t slow_tick;
+  uint8_t slow_on;
 } soft_pwm_runtime_t;
 
 typedef enum {
@@ -123,7 +177,22 @@ uint8_t heater_uses_timer(uint32_t timer);
 
 /// Switch on the clock of a general purpose timer (TIM1..4, TIM9..11).
 void timer_clock_on(uint32_t timer);
-void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t target_temp);
+void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp,
+                 uint16_t target_temp, float temp_c);
+
+/// Feed-forward of the hotend PID for the part fan, M301 F, counts at full
+/// fan speed * 100.
+void pid_set_fan_ff(uint32_t centi_counts);
+uint32_t pid_get_fan_ff(void);
+
+#ifdef HEATER_FAN
+/// Part fan speed (M106 S, 0..255), with kick-start and minimum PWM.
+void fan_set(uint8_t speed);
+/// Current part fan speed as set by fan_set().
+uint8_t fan_get(void);
+/// Kick-start timing, every 10 ms.
+void fan_tick(void);
+#endif
 
 void soft_pwm_tick(void);
 

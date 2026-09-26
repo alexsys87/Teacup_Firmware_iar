@@ -121,7 +121,10 @@ TEACUP_STEP_RAMFUNC static uint32_t schedule_idle(uint32_t now) {
 
 TEACUP_HOT
 TEACUP_STEP_RAMFUNC uint32_t la_service(uint32_t now) {
-  int32_t d = la_e_nominal + advance_now(now) - la_e_actual;
+  // One volatile access per statement (IAR Pa082).
+  int32_t nominal = la_e_nominal;
+  int32_t actual = la_e_actual;
+  int32_t d = nominal + advance_now(now) - actual;
   uint8_t dir;
   uint32_t since;
 
@@ -172,15 +175,21 @@ uint8_t la_busy(void) {
   uint8_t busy;
 
   ATOMIC_START();
-    busy = adv_to != 0 || advance_now(TIM5->CNT) != 0 ||
-           la_e_actual != la_e_nominal;
+    // One volatile access per statement (IAR Pa082).
+    uint32_t now = TIM5->CNT;
+    int32_t nominal = la_e_nominal;
+    int32_t actual = la_e_actual;
+
+    busy = adv_to != 0 || advance_now(now) != 0 || actual != nominal;
   ATOMIC_END();
   return busy;
 }
 
 void la_flush(void) {
+  int32_t actual = la_e_actual;           // IAR Pa082.
+
   adv_from = adv_to = adv_slope = 0;
-  la_e_nominal = la_e_actual;
+  la_e_nominal = actual;
 }
 
 #endif /* LINEAR_ADVANCE */

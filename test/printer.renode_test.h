@@ -248,6 +248,12 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 //#define BANG_BANG_ON             200
 //#define BANG_BANG_OFF            45
 
+/** \def FAN_KICKSTART_TIME FAN_MIN_PWM
+  Part fan kick-start and minimum PWM, tested with M106 / M107.
+*/
+#define FAN_KICKSTART_TIME       100
+#define FAN_MIN_PWM              20
+
 /** \def MOVEBUFFER_SIZE
   Move buffer size, in number of moves.
 */

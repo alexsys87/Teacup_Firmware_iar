@@ -206,7 +206,7 @@ check('no USB protocol violations', prot == [], prot[:5])
 print('--- routing ---')
 check('M115 over USB: answer on USB', any('FIRMWARE_NAME:Teacup' in l for l in usb('r_usb')) and oks(usb('r_usb')), usb('r_usb'))
 check('M115 over USB: nothing on UART', uart('r_usb') == [], uart('r_usb'))
-check('M105 over UART: answer on UART only', uart('r_uart') == ['ok T:25.0/0.0'] and usb('r_uart') == [], (uart('r_uart'), usb('r_uart')))
+check('M105 over UART: answer on UART only', uart('r_uart') == ['ok T:25.0/0.0 @:0'] and usb('r_uart') == [], (uart('r_uart'), usb('r_uart')))
 ub, uu = oks(uart('r_both')), oks(usb('r_both'))
 nb = [int(re.match(r'ok N(\d+)', l).group(1)) for l in ub if re.match(r'ok N\d+', l)]
 nu = [int(re.match(r'ok N(\d+)', l).group(1)) if re.match(r'ok N\d+', l) else -1 for l in uu]
@@ -237,10 +237,10 @@ p = [l for l in usb('f_pos') if l.startswith('X:')]
 check('end position after burst X1 Y1', p and p[0].startswith('X:1.000 Y:1.000'), p)
 
 print('--- host not reading / closed / unplugged ---')
-check('UART answers while USB host does not read', 'ok T:25.0/0.0' in uart('n_uart'), uart('n_uart'))
+check('UART answers while USB host does not read', 'ok T:25.0/0.0 @:0' in uart('n_uart'), uart('n_uart'))
 check('host reads again: USB answers', any('FIRMWARE_NAME' in l for l in usb('n_reads')), usb('n_reads')[-3:])
 check('port closed: nothing arrives', usb('c_closed') == [], usb('c_closed'))
-check('port closed: UART works', 'ok T:25.0/0.0' in uart('c_uart'), uart('c_uart'))
+check('port closed: UART works', 'ok T:25.0/0.0 @:0' in uart('c_uart'), uart('c_uart'))
 check('port opened: buffered answer arrives', any('FIRMWARE_NAME' in l for l in usb('c_open')), usb('c_open'))
 uu = uart('u_unplugged')
 check('unplugged: UART commands run', any(l.startswith('X:5.000') for l in uu) and len(oks(uu)) >= 4, uu[-4:])
