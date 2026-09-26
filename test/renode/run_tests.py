@@ -34,8 +34,9 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 FORCE = sym('temp_dummy_force')
 STATUS_MSG = sym('status_msg')
 PLANT = sym('temp_dummy_plant')
-# Linear advance steps E on its own (motion/linear_advance.c).
-LINEAR_ADVANCE = sym('la_isr') != 0
+# Linear advance and input shaping step E, X, Y on their own
+# (motion/linear_advance.c, motion/input_shaping.c).
+STEP_AUX = sym('la_service') != 0 or sym('shaper_service') != 0
 
 lines = []
 def cmd(c): lines.append(c)
@@ -656,9 +657,9 @@ if want('perf'):
     st = [l for l in uart('f_stats') if l.startswith('echo:Step IRQ')]
     m = re.search(r'n (\d+), cycles min (\d+) avg (\d+) max (\d+), latency max (\d+), late (\d+), pulses (\d+)', st[0]) if st else None
     # Pulse end interrupts only for GPIO steps (none with timer pulses on
-    # all axes of the test board). With linear advance E pulses which
-    # don't come right after a step get a pulse end of their own.
-    if LINEAR_ADVANCE and not STEP_TIMERS:
+    # all axes of the test board). With linear advance or input shaping,
+    # pulses which don't come right after a step get a pulse end of their own.
+    if STEP_AUX and not STEP_TIMERS:
         ok = bool(m) and int(m.group(1)) >= 800 and int(m.group(7)) >= int(m.group(1))
     else:
         ok = bool(m) and int(m.group(1)) >= 800 and \
@@ -673,9 +674,9 @@ if want('perf'):
     if STEP_TIMERS:
         check('X: 800 timer pulses, no GPIO pulses', nx == 800 and rx == 0, (nx, rx))
     else:
-        # With linear advance, pulse ends of E alone lower X, too.
+        # With linear advance or shaping, pulse ends of other pulses lower X, too.
         check('X: 800 pulses, each one ended', nx == 800 and
-              (rx >= nx if LINEAR_ADVANCE else rx == nx), (nx, rx))
+              (rx >= nx if STEP_AUX else rx == nx), (nx, rx))
     va = {}
     for tag in ('F_ODR_A', 'F_ODR_B'):
         mm = re.search(r'@+%s.*?OutputData\), returned (0x[0-9A-Fa-f]+)' % tag, out, re.S)

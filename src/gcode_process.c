@@ -1355,6 +1355,63 @@ void process_gcode_command(void) {
         }
         break;
 
+      #ifdef INPUT_SHAPING
+      case 593:
+        //? --- M593: Input shaping and S-curve smoothing of X and Y ---
+        //?
+        //? Example: M593 Y F35 D0.1 T1   (Y: 35 Hz, damping 0.1, MZV)
+        //? Example: M593 F40             (X and Y: 40 Hz)
+        //? Example: M593 S8              (S-curve: 8 ms smoothing)
+        //?
+        //? X, Y select the axes, without them both. F: resonance frequency
+        //? in Hz, 0 = off. D: damping ratio (0..0.99). T: 0 = ZV (shortest
+        //? delay), 1 = MZV (less sensitive to a wrong frequency). S: S-curve
+        //? smoothing time in ms for X and Y, 0 = off, max. 100. Waits for
+        //? the moves in the queue first. Without parameters: report.
+        //?
+        if (next_target.seen_F || next_target.seen_D ||
+            next_target.seen_T || next_target.seen_S) {
+          uint8_t a, ax[2];
+
+          ax[0] = next_target.seen_X || ! next_target.seen_Y;
+          ax[1] = next_target.seen_Y || ! next_target.seen_X;
+          queue_wait();
+          for (a = 0; a < 2; a++) {
+            if ( ! ax[a])
+              continue;
+            if (next_target.seen_F) {
+              if (next_target.F_milli >= 0 && next_target.F_milli <= 500000L)
+                settings.is_freq[a] = (uint32_t)(next_target.F_milli / 10);
+              else
+                serial_writestr("echo:M593 F out of range (0..500)\n");
+            }
+            if (next_target.seen_D) {
+              if (next_target.D_milli >= 0 && next_target.D_milli < 1000)
+                settings.is_damp[a] = (uint32_t)next_target.D_milli;
+              else
+                serial_writestr("echo:M593 D out of range (0..0.99)\n");
+            }
+            if (next_target.seen_T) {
+              if (next_target.T_value == 0 || next_target.T_value == 1)
+                settings.is_type[a] = (uint32_t)next_target.T_value;
+              else
+                serial_writestr("echo:M593 T is 0 (ZV) or 1 (MZV)\n");
+            }
+          }
+          if (next_target.seen_S) {
+            if (next_target.S >= 0 && next_target.S <= 100)
+              settings.s_curve_us = (uint32_t)next_target.S * 1000UL;
+            else
+              serial_writestr("echo:M593 S out of range (0..100 ms)\n");
+          }
+          settings_apply();
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
       #ifdef LINEAR_ADVANCE
       case 900:
         //? --- M900: Linear advance factor ---

@@ -20,6 +20,7 @@
 #include "atomic.h"
 #include "babystep.h"
 #include "linear_advance.h"
+#include "input_shaping.h"
 
 #if TICK_TIME > 0xFFFFFF
   #error TICK_TIME too large for the 24 bit SysTick timer.
@@ -58,10 +59,13 @@ void timer_init(void) {
   NVIC_EnableIRQ(TIM5_IRQn);
 }
 
+static void timer_check_missed(void);
+
 /** System clock interrupt. */
 TEACUP_HOT
 void SysTick_Handler(void) {
   clock_tick();
+  timer_check_missed();
   SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;           // Trigger PendSV_Handler().
 }
 
@@ -84,10 +88,51 @@ void step_stats_reset(void) {
   step_stats.since = clock_millis();
 }
 
+/**
+  A step whose compare time has passed already (timer_set()) runs from
+  this flag and a pending interrupt, not from an EGR write: CC1G would do
+  on the STM32, but Renode's timer model resets the counter on any EGR
+  write, which moves all time stamps (babysteps, input shaping) into the
+  future.
+*/
+static volatile uint8_t step_kicked;
+
 /// Bit numbers in TIM5->DIER, for atomic bit-band access.
 #define DIER_CC1IE_BIT  1
 #define DIER_CC2IE_BIT  2
 #define DIER_CC4IE_BIT  4
+
+/**
+  Safety net, every TICK_TIME: a compare match of the step timer (next
+  step, auxiliary generator) more than 1 ms overdue without its flag was
+  missed, run it from software. timer_set() and timer_aux_set() catch
+  compare times in the past, so on the STM32 this doesn't happen. Renode's
+  timer model misses a compare set just ahead of the counter now and then,
+  which would stop the steps for a full round of the counter (51 s).
+*/
+static void timer_check_missed(void) {
+  ATOMIC_START();
+    uint32_t dier = TIM5->DIER;
+    uint32_t sr = TIM5->SR;
+    uint32_t now = TIM5->CNT;
+
+    if ((dier & TIM_DIER_CC1IE) && ! (sr & TIM_SR_CC1IF) &&
+        (int32_t)(now - TIM5->CCR1) > (int32_t)(1 MS)) {
+      PERIPH_BIT(TIM5->DIER, DIER_CC1IE_BIT) = 0;
+      step_kicked = 1;
+      NVIC_SetPendingIRQ(TIM5_IRQn);
+      step_stats.late++;
+    }
+    #ifdef STEP_AUX
+      if ((dier & TIM_DIER_CC4IE) && ! (sr & TIM_SR_CC4IF) &&
+          (int32_t)(now - TIM5->CCR4) > (int32_t)(1 MS)) {
+        PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
+        aux_kicked = 1;
+        NVIC_SetPendingIRQ(TIM5_IRQn);
+      }
+    #endif
+  ATOMIC_END();
+}
 
 TEACUP_HOT
 TEACUP_STEP_RAMFUNC void timer_step_pulse_end(void) {
@@ -96,14 +141,22 @@ TEACUP_STEP_RAMFUNC void timer_step_pulse_end(void) {
   PERIPH_BIT(TIM5->DIER, DIER_CC2IE_BIT) = 1;
 }
 
-#ifdef LINEAR_ADVANCE
+#ifdef STEP_AUX
 /*
+  Auxiliary step generator: steps that don't follow the Bresenham steps of
+  the moves right away, E of linear advance (motion/linear_advance.c) and
+  X/Y of input shaping (motion/input_shaping.c). They share compare
+  channel 4 of the step timer: each part does what is due and tells when
+  it wants to run again, the earliest of these is scheduled.
+
   "Right away" is a software flag plus a pending interrupt, not an EGR
   write: CC4G would do on the STM32, but Renode's timer model resets the
   counter on any EGR write, which delays the next step.
 */
+volatile uint8_t aux_kicked;
+
 TEACUP_HOT
-TEACUP_STEP_RAMFUNC void timer_e_set(uint32_t delay) {
+TEACUP_STEP_RAMFUNC static void timer_aux_set(uint32_t delay) {
   uint32_t compare = TIM5->CNT + delay;
 
   TIM5->CCR4 = compare;
@@ -111,25 +164,44 @@ TEACUP_STEP_RAMFUNC void timer_e_set(uint32_t delay) {
   PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 1;
   if ((int32_t)(TIM5->CNT - compare) >= 0) {    // Due already.
     PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
-    la_kicked = 1;
+    aux_kicked = 1;
     NVIC_SetPendingIRQ(TIM5_IRQn);
   }
 }
 
-TEACUP_HOT
-TEACUP_STEP_RAMFUNC void timer_e_off(void) {
-  PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
-  TIM5->SR = ~TIM_SR_CC4IF;
+void timer_aux_kick(void) {
+  aux_kicked = 1;
+  NVIC_SetPendingIRQ(TIM5_IRQn);
 }
-#endif
+
+TEACUP_HOT
+TEACUP_STEP_RAMFUNC static void aux_isr(void) {
+  uint32_t now = TIM5->CNT;
+  uint32_t next = AUX_NONE, d;
+
+  aux_kicked = 0;
+  #ifdef LINEAR_ADVANCE
+    d = la_service(now);
+    if (d < next)
+      next = d;
+  #endif
+  #ifdef INPUT_SHAPING
+    d = shaper_service(now);
+    if (d < next)
+      next = d;
+  #endif
+  if (next != AUX_NONE)
+    timer_aux_set(next);
+}
+#endif /* STEP_AUX */
 
 /**
   Step timer interrupt. Four sources:
    - Compare 2: end of the step pulses, lower all step pins.
    - Compare 3: babystep (M290), see core/babystep.c.
    - Compare 1: time for the next step.
-   - Compare 4: E generator of linear advance, see motion/linear_advance.c.
-     It also runs right after a step with a Bresenham E step.
+   - Compare 4: auxiliary step generator (linear advance, input shaping),
+     see aux_isr(). It also runs right after a step which gave it work.
   Pulse end first, in case both are due, then babysteps, which must not
   start while a Z pulse is still high.
 */
@@ -157,13 +229,14 @@ TEACUP_STEP_RAMFUNC void TIM5_IRQHandler(void) {
     }
   #endif
 
-  if ((sr & TIM_SR_CC1IF) && (dier & TIM_DIER_CC1IE)) {
+  if (step_kicked || ((sr & TIM_SR_CC1IF) && (dier & TIM_DIER_CC1IE))) {
     uint32_t now = TIM5->CNT;               // One volatile access per
     uint32_t match = TIM5->CCR1;            // statement (IAR Pa082).
     uint32_t latency = now - match;
     uint32_t duration;
 
     // Turn off step interrupt generation, timer counter continues.
+    step_kicked = 0;
     PERIPH_BIT(TIM5->DIER, DIER_CC1IE_BIT) = 0;
     TIM5->SR = ~TIM_SR_CC1IF;
 
@@ -180,11 +253,11 @@ TEACUP_STEP_RAMFUNC void TIM5_IRQHandler(void) {
       step_stats.max_latency = latency;
   }
 
-  #ifdef LINEAR_ADVANCE
-    if (la_kicked || ((sr & TIM_SR_CC4IF) && (dier & TIM_DIER_CC4IE))) {
+  #ifdef STEP_AUX
+    if (aux_kicked || ((sr & TIM_SR_CC4IF) && (dier & TIM_DIER_CC4IE))) {
       PERIPH_BIT(TIM5->DIER, DIER_CC4IE_BIT) = 0;
       TIM5->SR = ~TIM_SR_CC4IF;
-      la_isr();
+      aux_isr();
     }
   #endif
 
@@ -236,7 +309,10 @@ TEACUP_STEP_RAMFUNC uint8_t timer_set(int32_t delay, uint8_t check_short) {
 
     now = TIM5->CNT;
     if ((int32_t)(now - compare) >= 0) {
-      TIM5->EGR = TIM_EGR_CC1G;                 // Too late, fire right now.
+      // Too late, fire right now (see step_kicked).
+      PERIPH_BIT(TIM5->DIER, DIER_CC1IE_BIT) = 0;
+      step_kicked = 1;
+      NVIC_SetPendingIRQ(TIM5_IRQn);
       step_stats.late++;
     }
   }
@@ -246,30 +322,12 @@ TEACUP_STEP_RAMFUNC uint8_t timer_set(int32_t delay, uint8_t check_short) {
 
 /** Timer reset.
 
-  Reset the timer base, so step interrupts scheduled at an arbitrary point
-  in time are counted from now.
+  The step timer was idle: count the next step interrupt from now. The
+  counter keeps running, so babysteps and the auxiliary step generator
+  keep their schedules and time stamps.
 */
 void timer_reset(void) {
-  #ifdef LINEAR_ADVANCE
-    // The E generator may run: keep its schedule and time stamps.
-    ATOMIC_START();
-      uint32_t old = TIM5->CNT;
-
-      TIM5->CNT = 0;
-      TIM5->CCR1 = 0;
-      TIM5->CCR4 -= old;
-      la_rebase(old);
-    ATOMIC_END();
-  #else
-  TIM5->CNT = 0;
-  TIM5->CCR1 = 0;
-  #endif
-  #ifdef BABYSTEPPING
-    // A babystep scheduled on the old time base would wait for a full
-    // round of the counter.
-    if (TIM5->DIER & TIM_DIER_CC3IE)
-      TIM5->CCR3 = 1000;
-  #endif
+  TIM5->CCR1 = TIM5->CNT;
 }
 
 /** Stop timers. This means to be an emergency stop. */

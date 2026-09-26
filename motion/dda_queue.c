@@ -16,6 +16,7 @@
 #include "cpu.h"
 #include "babystep.h"
 #include "linear_advance.h"
+#include "input_shaping.h"
 
 /**
   Movebuffer head pointer. Points to the last move in the queue. This variable
@@ -182,6 +183,11 @@ void queue_flush(void) {
   #ifdef LINEAR_ADVANCE
     la_flush();
   #endif
+  #ifdef STEP_AUX
+    // M410 stopped the step timer. The shaper still has to emit the steps
+    // of the motion done so far, so the position stays right.
+    timer_aux_kick();
+  #endif
 }
 
 /// wait for queue to empty, including babysteps and linear advance
@@ -191,6 +197,9 @@ void queue_wait(void) {
   while (mb_tail_dda != NULL || babystep_busy()
          #ifdef LINEAR_ADVANCE
            || la_busy()
+         #endif
+         #ifdef INPUT_SHAPING
+           || shaper_busy()
          #endif
         )
     clock_poll();

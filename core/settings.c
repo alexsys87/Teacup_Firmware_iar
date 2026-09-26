@@ -6,7 +6,8 @@
   loaded at startup. M502 restores the defaults, M503 reports.
 
   Stored: steps per mm, max. feedrates, max. accelerations, accelerations
-  for printing, retracts and travel, linear advance K,
+  for printing, retracts and travel, linear advance K, input shaping and
+  S-curve,
   jerk, home offsets, PID values of all heaters, stepper idle timeout,
   Z offset (M290), probe offset (M851), filament runout (M412), bed
   leveling mesh and state (G29, M420, M421). The layout is the same with
@@ -32,10 +33,11 @@
 #include "filament.h"
 #include "bed_leveling.h"
 #include "gcode_parse.h"
+#include "input_shaping.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except versions 1 to 3, which get converted.
-#define SETTINGS_VERSION 4
+/// except versions 1 to 4, which get converted.
+#define SETTINGS_VERSION 5
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -104,6 +106,15 @@ typedef struct {
 typedef struct {
   settings_store_v3_t v3;
   uint32_t   la_k;
+} settings_store_v4_t;
+
+/// Version 5: version 4 plus input shaping and S-curve (M593).
+typedef struct {
+  settings_store_v4_t v4;
+  uint32_t   is_freq[2];
+  uint32_t   is_damp[2];
+  uint32_t   is_type[2];
+  uint32_t   s_curve_us;
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -133,6 +144,13 @@ void settings_defaults(void) {
   settings.accel_retract = ACCELERATION_RETRACT;
   settings.accel_travel = ACCELERATION_TRAVEL;
   settings.la_k = (uint32_t)(LINEAR_ADVANCE_K * 10000. + 0.5);
+  settings.is_freq[0] = (uint32_t)(INPUT_SHAPING_FREQ_X * 100. + 0.5);
+  settings.is_freq[1] = (uint32_t)(INPUT_SHAPING_FREQ_Y * 100. + 0.5);
+  settings.is_damp[0] = (uint32_t)(INPUT_SHAPING_DAMPING_X * 1000. + 0.5);
+  settings.is_damp[1] = (uint32_t)(INPUT_SHAPING_DAMPING_Y * 1000. + 0.5);
+  settings.is_type[0] = INPUT_SHAPING_TYPE_X;
+  settings.is_type[1] = INPUT_SHAPING_TYPE_Y;
+  settings.s_curve_us = (uint32_t)(S_CURVE_TIME * 1000. + 0.5);
   settings.max_jerk[X] = MAX_JERK_X;
   settings.max_jerk[Y] = MAX_JERK_Y;
   settings.max_jerk[Z] = MAX_JERK_Z;
@@ -158,6 +176,9 @@ void settings_defaults(void) {
 
 void settings_apply(void) {
   dda_maths_update();
+  #ifdef INPUT_SHAPING
+    shaper_configure();
+  #endif
 }
 
 /// Everything of version 1 into the store.
@@ -199,7 +220,8 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
-  settings_store_v2_t *v2 = &store.v3.v2;
+  settings_store_v2_t *v2 = &store.v4.v3.v2;
+  uint8_t a;
 
   memset(&store, 0, sizeof(store));
   store_v1(&v2->v1);
@@ -221,9 +243,15 @@ uint8_t settings_save(void) {
   #ifdef BED_LEVELING
     v2->mesh = mesh;
   #endif
-  store.v3.accel_retract = settings.accel_retract;
-  store.v3.accel_travel = settings.accel_travel;
-  store.la_k = settings.la_k;
+  store.v4.v3.accel_retract = settings.accel_retract;
+  store.v4.v3.accel_travel = settings.accel_travel;
+  store.v4.la_k = settings.la_k;
+  for (a = 0; a < 2; a++) {
+    store.is_freq[a] = settings.is_freq[a];
+    store.is_damp[a] = settings.is_damp[a];
+    store.is_type[a] = settings.is_type[a];
+  }
+  store.s_curve_us = settings.s_curve_us;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -272,14 +300,31 @@ static void report_old(const void *data, uint16_t length) {
              length, flash_store_crc32(data, length));
 }
 
+/// Version 4 part from the store.
+static void load_v4(const settings_store_v4_t *v4) {
+  load_v3(&v4->v3);
+  if (v4->la_k <= 100000UL)
+    settings.la_k = v4->la_k;
+}
+
 uint8_t settings_load(void) {
   static settings_store_t store;
-  settings_store_v3_t *v3 = &store.v3;
+  settings_store_v4_t *v4 = &store.v4;
+  settings_store_v3_t *v3 = &store.v4.v3;
+  uint8_t a;
 
   if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    load_v3(v3);
-    if (store.la_k <= 100000UL)
-      settings.la_k = store.la_k;
+    load_v4(v4);
+    for (a = 0; a < 2; a++) {
+      if (store.is_freq[a] <= 50000UL)          // Up to 500 Hz.
+        settings.is_freq[a] = store.is_freq[a];
+      if (store.is_damp[a] < 1000UL)
+        settings.is_damp[a] = store.is_damp[a];
+      if (store.is_type[a] <= 1)
+        settings.is_type[a] = store.is_type[a];
+    }
+    if (store.s_curve_us <= 100000UL)
+      settings.s_curve_us = store.s_curve_us;
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
     return 1;
@@ -287,6 +332,11 @@ uint8_t settings_load(void) {
 
   // Older records without the new fields? Take what's there, the new
   // fields keep their values.
+  if (flash_store_read(v4, sizeof(*v4), 4)) {
+    load_v4(v4);
+    report_old(v4, sizeof(*v4));
+    return 1;
+  }
   if (flash_store_read(v3, sizeof(*v3), 3)) {
     load_v3(v3);
     report_old(v3, sizeof(*v3));
@@ -395,6 +445,32 @@ void settings_report(void) {
     serial_writechar((char)('0' + (s->la_k / 10) % 10));
     serial_writechar((char)('0' + s->la_k % 10));
     serial_writechar('\n');
+  #endif
+
+  #ifdef INPUT_SHAPING
+  {
+    uint8_t a;
+
+    serial_writestr("echo:; Input Shaping: F<Hz> D<zeta> T<0 = ZV, 1 = MZV>, S-curve S<ms>\n");
+    for (a = 0; a < 2; a++) {
+      serial_writestr(a ? "echo:  M593 Y F" : "echo:  M593 X F");
+      write_milli2((int32_t)s->is_freq[a] * 10);
+      serial_writestr(" D0.");
+      serial_writechar((char)('0' + (s->is_damp[a] / 100) % 10));
+      serial_writechar((char)('0' + (s->is_damp[a] / 10) % 10));
+      serial_writechar((char)('0' + s->is_damp[a] % 10));
+      serial_writestr(" T");
+      serwrite_uint32(s->is_type[a]);
+      serial_writechar('\n');
+    }
+    serial_writestr("echo:  M593 S");
+    write_milli2((int32_t)s->s_curve_us);
+    if (shaper_overflows) {
+      serial_writestr(" ; history overflows: ");
+      serwrite_uint32(shaper_overflows);
+    }
+    serial_writechar('\n');
+  }
   #endif
 
   serial_writestr("echo:; Advanced: X<max_x_jerk> Y<max_y_jerk> Z<max_z_jerk> E<max_e_jerk>\n");

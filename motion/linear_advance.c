@@ -20,11 +20,12 @@
    - dda_clock() sets the advance from the current speed every TICK_TIME
      (la_set_advance()). The change is spread evenly over the next
      TICK_TIME, the speed changes in steps of TICK_TIME, too.
-   - la_isr() steps the E motor (la_e_actual) towards nominal + advance,
-     one step at a time, at least LA_STEP_GAP apart, setting the direction
-     pin as needed. It runs in the step interrupt: right after each
-     Bresenham E step, and scheduled by compare channel 4 of the step timer
-     while the advance changes or E has to catch up.
+   - la_service() steps the E motor (la_e_actual) towards nominal +
+     advance, one step at a time, at least LA_STEP_GAP apart, setting the
+     direction pin as needed. It's part of the auxiliary step generator
+     (hal/timer.c) in the step interrupt: it runs right after each
+     Bresenham E step, and again when it asks for it while the advance
+     changes or E has to catch up.
 
   Moves without linear advance (K = 0, retracts, travel) get advance 0, E
   then follows the Bresenham steps one by one.
@@ -53,7 +54,6 @@
 
 volatile int32_t la_e_nominal;
 volatile int32_t la_e_actual;
-volatile uint8_t la_kicked;
 
 /// Advance: from adv_from at adv_t0 linearly to adv_to at adv_t0 +
 /// LA_INTERP. adv_slope is (adv_to - adv_from) / LA_INTERP, 16.16 fixed
@@ -101,15 +101,13 @@ TEACUP_STEP_RAMFUNC static void e_pulse(void) {
   sleep until the next Bresenham step or the next la_set_advance().
 */
 TEACUP_HOT
-TEACUP_STEP_RAMFUNC static void schedule_idle(uint32_t now) {
+TEACUP_STEP_RAMFUNC static uint32_t schedule_idle(uint32_t now) {
   uint32_t t = now - adv_t0;
   int32_t diff = adv_to - adv_from;
   uint32_t dt, rest;
 
-  if (t >= LA_INTERP || diff == 0) {
-    timer_e_off();
-    return;
-  }
+  if (t >= LA_INTERP || diff == 0)
+    return AUX_NONE;
   if (diff < 0)
     diff = -diff;
   dt = LA_INTERP / (uint32_t)diff;
@@ -118,51 +116,40 @@ TEACUP_STEP_RAMFUNC static void schedule_idle(uint32_t now) {
     dt = rest;
   if (dt < LA_STEP_GAP)
     dt = LA_STEP_GAP;
-  timer_e_set(dt);
+  return dt;
 }
 
 TEACUP_HOT
-TEACUP_STEP_RAMFUNC void la_isr(void) {
-  uint32_t now = TIM5->CNT;
+TEACUP_STEP_RAMFUNC uint32_t la_service(uint32_t now) {
   int32_t d = la_e_nominal + advance_now(now) - la_e_actual;
   uint8_t dir;
   uint32_t since;
 
-  la_kicked = 0;
-
-  if (d == 0) {
-    schedule_idle(now);
-    return;
-  }
+  if (d == 0)
+    return schedule_idle(now);
 
   dir = (d > 0) ? 1 : 0;
   if (dir != e_dir) {
     e_direction(dir);
     e_dir = dir;
     last_dir = now;
-    timer_e_set(LA_DIR_SETUP);
-    return;
+    return LA_DIR_SETUP;
   }
 
   since = now - last_dir;
-  if (since < LA_DIR_SETUP) {
-    timer_e_set(LA_DIR_SETUP - since);
-    return;
-  }
+  if (since < LA_DIR_SETUP)
+    return LA_DIR_SETUP - since;
   since = now - last_step;
-  if (since < LA_STEP_GAP) {
-    timer_e_set(LA_STEP_GAP - since);
-    return;
-  }
+  if (since < LA_STEP_GAP)
+    return LA_STEP_GAP - since;
 
   e_pulse();
   la_e_actual += dir ? 1 : -1;
   last_step = now;
 
   if (d > 1 || d < -1)
-    timer_e_set(LA_STEP_GAP);
-  else
-    schedule_idle(now);
+    return LA_STEP_GAP;
+  return schedule_idle(now);
 }
 
 void la_set_advance(int32_t steps) {
@@ -176,7 +163,7 @@ void la_set_advance(int32_t steps) {
       adv_t0 = now;
       adv_slope = (int32_t)(((int64_t)(steps - cur) << 16) /
                             (int64_t)LA_INTERP);
-      timer_e_set(0);                         // Look at it right away.
+      timer_aux_kick();                       // Look at it right away.
     }
   ATOMIC_END();
 }
@@ -192,16 +179,8 @@ uint8_t la_busy(void) {
 }
 
 void la_flush(void) {
-  timer_e_off();
-  la_kicked = 0;
   adv_from = adv_to = adv_slope = 0;
   la_e_nominal = la_e_actual;
-}
-
-void la_rebase(uint32_t offset) {
-  adv_t0 -= offset;
-  last_step -= offset;
-  last_dir -= offset;
 }
 
 #endif /* LINEAR_ADVANCE */

@@ -69,6 +69,7 @@ typedef struct {
   int32_t           U_milli;    ///< U word in thousandths (M600 unload length)
   int32_t           L_milli;    ///< L word in thousandths (M600 load length)
   int32_t           K_value;    ///< K word in 1/10000 (M900 linear advance)
+  int32_t           F_milli;    ///< F word in thousandths for M593 (Hz)
   uint16_t          P;          ///< P word (various uses)
 
 	uint16_t						G;				///< G command number
