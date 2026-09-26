@@ -6,7 +6,7 @@
   loaded at startup. M502 restores the defaults, M503 reports.
 
   Stored: steps per mm, max. feedrates, max. accelerations, accelerations
-  for printing, retracts and travel,
+  for printing, retracts and travel, linear advance K,
   jerk, home offsets, PID values of all heaters, stepper idle timeout,
   Z offset (M290), probe offset (M851), filament runout (M412), bed
   leveling mesh and state (G29, M420, M421). The layout is the same with
@@ -34,8 +34,8 @@
 #include "gcode_parse.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except versions 1 and 2, which get converted.
-#define SETTINGS_VERSION 3
+/// except versions 1 to 3, which get converted.
+#define SETTINGS_VERSION 4
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -98,6 +98,12 @@ typedef struct {
   settings_store_v2_t v2;
   uint32_t   accel_retract;
   uint32_t   accel_travel;
+} settings_store_v3_t;
+
+/// Version 4: version 3 plus linear advance (M900 K).
+typedef struct {
+  settings_store_v3_t v3;
+  uint32_t   la_k;
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -126,6 +132,7 @@ void settings_defaults(void) {
   settings.acceleration = ACCELERATION;
   settings.accel_retract = ACCELERATION_RETRACT;
   settings.accel_travel = ACCELERATION_TRAVEL;
+  settings.la_k = (uint32_t)(LINEAR_ADVANCE_K * 10000. + 0.5);
   settings.max_jerk[X] = MAX_JERK_X;
   settings.max_jerk[Y] = MAX_JERK_Y;
   settings.max_jerk[Z] = MAX_JERK_Z;
@@ -192,7 +199,7 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
-  settings_store_v2_t *v2 = &store.v2;
+  settings_store_v2_t *v2 = &store.v3.v2;
 
   memset(&store, 0, sizeof(store));
   store_v1(&v2->v1);
@@ -214,8 +221,9 @@ uint8_t settings_save(void) {
   #ifdef BED_LEVELING
     v2->mesh = mesh;
   #endif
-  store.accel_retract = settings.accel_retract;
-  store.accel_travel = settings.accel_travel;
+  store.v3.accel_retract = settings.accel_retract;
+  store.v3.accel_travel = settings.accel_travel;
+  store.la_k = settings.la_k;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -249,15 +257,29 @@ static void load_v2(const settings_store_v2_t *v2) {
   #endif
 }
 
+/// Version 3 part from the store.
+static void load_v3(const settings_store_v3_t *v3) {
+  load_v2(&v3->v2);
+  if (v3->accel_retract)
+    settings.accel_retract = v3->accel_retract;
+  if (v3->accel_travel)
+    settings.accel_travel = v3->accel_travel;
+}
+
+/// Report a loaded record of an older layout.
+static void report_old(const void *data, uint16_t length) {
+  sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
+             length, flash_store_crc32(data, length));
+}
+
 uint8_t settings_load(void) {
   static settings_store_t store;
+  settings_store_v3_t *v3 = &store.v3;
 
   if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    load_v2(&store.v2);
-    if (store.accel_retract)
-      settings.accel_retract = store.accel_retract;
-    if (store.accel_travel)
-      settings.accel_travel = store.accel_travel;
+    load_v3(v3);
+    if (store.la_k <= 100000UL)
+      settings.la_k = store.la_k;
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
     return 1;
@@ -265,18 +287,19 @@ uint8_t settings_load(void) {
 
   // Older records without the new fields? Take what's there, the new
   // fields keep their values.
-  if (flash_store_read(&store.v2, sizeof(store.v2), 2)) {
-    load_v2(&store.v2);
-    sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
-               (uint16_t)sizeof(store.v2),
-               flash_store_crc32(&store.v2, sizeof(store.v2)));
+  if (flash_store_read(v3, sizeof(*v3), 3)) {
+    load_v3(v3);
+    report_old(v3, sizeof(*v3));
     return 1;
   }
-  if (flash_store_read(&store.v2.v1, sizeof(store.v2.v1), 1)) {
-    load_v1(&store.v2.v1);
-    sersendf_P(("echo:Stored settings retrieved (%u bytes, old format; crc %lu)\n"),
-               (uint16_t)sizeof(store.v2.v1),
-               flash_store_crc32(&store.v2.v1, sizeof(store.v2.v1)));
+  if (flash_store_read(&v3->v2, sizeof(v3->v2), 2)) {
+    load_v2(&v3->v2);
+    report_old(&v3->v2, sizeof(v3->v2));
+    return 1;
+  }
+  if (flash_store_read(&v3->v2.v1, sizeof(v3->v2.v1), 1)) {
+    load_v1(&v3->v2.v1);
+    report_old(&v3->v2.v1, sizeof(v3->v2.v1));
     return 1;
   }
   return 0;
@@ -361,6 +384,18 @@ void settings_report(void) {
   serial_writestr(" R"); write_milli2((int32_t)s->accel_retract * 1000);
   serial_writestr(" T"); write_milli2((int32_t)s->accel_travel * 1000);
   serial_writechar('\n');
+
+  #ifdef LINEAR_ADVANCE
+    serial_writestr("echo:; Linear Advance:\n");
+    serial_writestr("echo:  M900 K");
+    serwrite_uint32(s->la_k / 10000);
+    serial_writechar('.');
+    serial_writechar((char)('0' + (s->la_k / 1000) % 10));
+    serial_writechar((char)('0' + (s->la_k / 100) % 10));
+    serial_writechar((char)('0' + (s->la_k / 10) % 10));
+    serial_writechar((char)('0' + s->la_k % 10));
+    serial_writechar('\n');
+  #endif
 
   serial_writestr("echo:; Advanced: X<max_x_jerk> Y<max_y_jerk> Z<max_z_jerk> E<max_e_jerk>\n");
   write_axes("M205", (int32_t)(s->max_jerk[X] * 50 / 3),

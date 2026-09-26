@@ -17,6 +17,7 @@ typedef struct {
   axes_uint32_t max_jerk;       ///< M205, mm/min.
   uint32_t      accel_retract;  ///< M204 R, E-only moves, mm/s^2.
   uint32_t      accel_travel;   ///< M204 T, moves without E, mm/s^2.
+  uint32_t      la_k;           ///< M900 K, linear advance, 1/10000 s.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.

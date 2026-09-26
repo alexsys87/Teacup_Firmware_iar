@@ -150,6 +150,18 @@
   #undef LOOKAHEAD
 #endif
 
+/**
+  Linear advance steps E on its own, based on the speed profile of
+  ACCELERATION_RAMPING with lookahead.
+*/
+#if defined LINEAR_ADVANCE && ! defined LOOKAHEAD
+  #warning LINEAR_ADVANCE needs ACCELERATION_RAMPING and LOOKAHEAD, ignored.
+  #undef LINEAR_ADVANCE
+#endif
+#ifndef LINEAR_ADVANCE_K
+  #define LINEAR_ADVANCE_K 0.0
+#endif
+
 #if defined BED_LEVELING && defined LOOKAHEAD && MAX_JERK_Z == 0
   #warning When bed-leveling is activated, lookahead will be ineffective \
            because MAX_JERK_Z is zero.

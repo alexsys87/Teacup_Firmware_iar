@@ -1355,6 +1355,29 @@ void process_gcode_command(void) {
         }
         break;
 
+      #ifdef LINEAR_ADVANCE
+      case 900:
+        //? --- M900: Linear advance factor ---
+        //?
+        //? Example: M900 K0.05
+        //?
+        //? K in seconds (Marlin units): the extruder runs ahead of its
+        //? nominal position by K * extrusion speed. 0 = off, max. 10.
+        //? Direct drive about 0.02..0.1, Bowden 0.2..1. Queued moves keep
+        //? their value. Without K: report (see M503).
+        //?
+        if (next_target.seen_K) {
+          if (next_target.K_value >= 0 && next_target.K_value <= 100000L)
+            settings.la_k = (uint32_t)next_target.K_value;
+          else
+            serial_writestr("echo:M900 K out of range (0..10)\n");
+        }
+        else {
+          settings_report();
+        }
+        break;
+      #endif
+
       case 301:
       case 304:
         //? --- M301: Set hotend PID, M304: Set bed PID ---

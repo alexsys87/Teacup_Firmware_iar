@@ -263,6 +263,9 @@ uint8_t gcode_parse_char(uint8_t c) {
 				case 'L':
 					next_target.L_milli = decfloat_to_int(&read_digit, 1000);
 					break;
+				case 'K':
+					next_target.K_value = decfloat_to_int(&read_digit, 10000);
+					break;
 				case 'P':
 					next_target.P_milli = decfloat_to_int(&read_digit, 1000);
 					next_target.P = decfloat_to_int(&read_digit, 1);
@@ -372,6 +375,9 @@ uint8_t gcode_parse_char(uint8_t c) {
         case 'L':
           next_target.seen_L = 1;
           break;
+        case 'K':
+          next_target.seen_K = 1;
+          break;
         case 'N':
           next_target.seen_N = 1;
           break;
@@ -453,6 +459,7 @@ uint8_t gcode_parse_char(uint8_t c) {
       next_target.seen_R = next_target.seen_I = next_target.seen_J = \
       next_target.seen_D = \
       next_target.seen_C = next_target.seen_U = next_target.seen_L = \
+      next_target.seen_K = \
       next_target.seen_G = next_target.seen_M = next_target.seen_checksum = \
       next_target.seen_semi_comment = next_target.seen_parens_comment = \
       next_target.read_string = next_target.checksum_read = \

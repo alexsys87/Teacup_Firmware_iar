@@ -118,6 +118,16 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define MAX_JERK_Z               24       // 0.4 mm/s
 #define MAX_JERK_E               300      // 5 mm/s
 
+/** \def LINEAR_ADVANCE LINEAR_ADVANCE_K
+  Linear advance (M900 K, Marlin units): the extruder runs ahead of the
+  nominal position by K * extrusion speed, K in seconds (mm of filament per
+  mm/s of filament speed). Evens out extrusion at corners and the seam.
+  Direct drive: K about 0.02..0.1, Bowden: 0.2..1. LINEAR_ADVANCE_K is the
+  default, 0 = off until M900. Needs ACCELERATION_RAMPING and LOOKAHEAD.
+*/
+#define LINEAR_ADVANCE
+#define LINEAR_ADVANCE_K         0.0
+
 /** \def BED_LEVELING GRID_POINTS_X GRID_POINTS_Y MESH_INSET LEVELING_FADE_HEIGHT
   Mesh bed leveling: bilinear grid of GRID_POINTS_X x GRID_POINTS_Y points
   (2..7), MESH_INSET mm away from the bed edges (X_MIN..X_MAX,

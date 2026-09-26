@@ -34,6 +34,8 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 FORCE = sym('temp_dummy_force')
 STATUS_MSG = sym('status_msg')
 PLANT = sym('temp_dummy_plant')
+# Linear advance steps E on its own (motion/linear_advance.c).
+LINEAR_ADVANCE = sym('la_isr') != 0
 
 lines = []
 def cmd(c): lines.append(c)
@@ -630,7 +632,9 @@ if want('slicer'):
     check('only the provoked checksum error', errors == ['Error:checksum mismatch, Last Line: 19'], errors)
     check('resend requested and accepted', 'Resend: 20' in uart('ps_resend'), uart('ps_resend'))
     unknown = sorted(set(l for l in allu if 'Unknown command' in l))
-    check('unknown: only M862.3 and M900', unknown == ['echo:Unknown command: "M8623"', 'echo:Unknown command: "M900"'], unknown)
+    # M900 is known with LINEAR_ADVANCE.
+    check('unknown: only M862.3 and M900', unknown in (['echo:Unknown command: "M8623"', 'echo:Unknown command: "M900"'],
+                                                      ['echo:Unknown command: "M8623"']), unknown)
     oks = sum(1 for l in allu if l == 'ok' or l.startswith('ok T:'))
     check('one ok per line (+ M110, resend, M105)', oks == len(SLICER_GCODE) + 3, (oks, len(SLICER_GCODE) + 3))
     check('temperatures reported while M109 waits', any(l.startswith('T:') for l in allu), '')
@@ -652,9 +656,13 @@ if want('perf'):
     st = [l for l in uart('f_stats') if l.startswith('echo:Step IRQ')]
     m = re.search(r'n (\d+), cycles min (\d+) avg (\d+) max (\d+), latency max (\d+), late (\d+), pulses (\d+)', st[0]) if st else None
     # Pulse end interrupts only for GPIO steps (none with timer pulses on
-    # all axes of the test board).
-    ok = bool(m) and int(m.group(1)) >= 800 and \
-         int(m.group(7)) == (0 if STEP_TIMERS else int(m.group(1)))
+    # all axes of the test board). With linear advance E pulses which
+    # don't come right after a step get a pulse end of their own.
+    if LINEAR_ADVANCE and not STEP_TIMERS:
+        ok = bool(m) and int(m.group(1)) >= 800 and int(m.group(7)) >= int(m.group(1))
+    else:
+        ok = bool(m) and int(m.group(1)) >= 800 and \
+             int(m.group(7)) == (0 if STEP_TIMERS else int(m.group(1)))
     check('M9001: every step gets a pulse end', ok, st)
     check('  late steps', bool(m) and int(m.group(6)) == 0, m.group(6) if m else None)
     nx = pulses('f_move', 'A', 10)
@@ -665,7 +673,9 @@ if want('perf'):
     if STEP_TIMERS:
         check('X: 800 timer pulses, no GPIO pulses', nx == 800 and rx == 0, (nx, rx))
     else:
-        check('X: 800 pulses, each one ended', nx == 800 and rx == nx, (nx, rx))
+        # With linear advance, pulse ends of E alone lower X, too.
+        check('X: 800 pulses, each one ended', nx == 800 and
+              (rx >= nx if LINEAR_ADVANCE else rx == nx), (nx, rx))
     va = {}
     for tag in ('F_ODR_A', 'F_ODR_B'):
         mm = re.search(r'@+%s.*?OutputData\), returned (0x[0-9A-Fa-f]+)' % tag, out, re.S)
