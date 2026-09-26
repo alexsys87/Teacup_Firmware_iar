@@ -462,16 +462,33 @@
 #if ! defined BLTOUCH
   #undef BLTOUCH_SERVO_PIN              // Pin reserved, but no servo.
 #endif
+#if defined BLTOUCH && defined INDUCTIVE_PROBE
+  #error Choose BLTOUCH or INDUCTIVE_PROBE, not both.
+#endif
 #ifdef BLTOUCH
+  // The BLTouch signal is active high, whatever the Z switch was.
+  #undef Z_INVERT_MIN
+#endif
+/**
+  Inductive / capacitive proximity sensor on Z_MIN_PIN: active low (NPN
+  NO) unless INDUCTIVE_PROBE_ACTIVE_HIGH. No servo, nothing to deploy.
+*/
+#ifdef INDUCTIVE_PROBE
+  #undef Z_INVERT_MIN
+  #ifndef INDUCTIVE_PROBE_ACTIVE_HIGH
+    #define Z_INVERT_MIN
+  #endif
+#endif
+#if defined BLTOUCH || defined INDUCTIVE_PROBE
   #define Z_PROBE
-  #ifndef BLTOUCH_SERVO_PIN
+  #if defined BLTOUCH && ! defined BLTOUCH_SERVO_PIN
     #error BLTOUCH needs BLTOUCH_SERVO_PIN.
   #endif
   #ifndef Z_MIN_PIN
-    #error BLTOUCH needs Z_MIN_PIN (probe signal).
+    #error A Z probe needs Z_MIN_PIN (probe signal).
   #endif
   #if ! defined X_MIN || ! defined X_MAX || ! defined Y_MIN || ! defined Y_MAX
-    #error BLTOUCH needs X_MIN, X_MAX, Y_MIN and Y_MAX.
+    #error A Z probe needs X_MIN, X_MAX, Y_MIN and Y_MAX.
   #endif
   #ifndef Z_PROBE_OFFSET_X
     #define Z_PROBE_OFFSET_X     0.0
@@ -537,7 +554,7 @@
 */
 #ifdef Z_STEPPER_ALIGN
   #ifndef Z_PROBE
-    #error Z_STEPPER_ALIGN (G34) needs a Z probe (BLTOUCH).
+    #error Z_STEPPER_ALIGN (G34) needs a Z probe (BLTOUCH or INDUCTIVE_PROBE).
   #endif
   #if ! defined Z2_STEP_PIN || ! defined Z_STEP_PIN
     #error Z_STEPPER_ALIGN (G34) needs Z_STEP_PIN and Z2_STEP_PIN.
