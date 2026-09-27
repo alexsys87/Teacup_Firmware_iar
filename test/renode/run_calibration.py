@@ -99,7 +99,9 @@ send('M420 S0\n'); run('0.2')
 
 # Homed from here on, hotend hot.
 cmd('sysbus WriteByte 0x%08X 7' % HOMED)
-adc(c_to_adc(200), c_to_adc(25)); send('M104 S200\n'); run('0.5')
+# Target first: a jump to 200 C with the heater off is "heater off but
+# temperature rising" for the thermal protection.
+send('M104 S200\n'); run('0.1'); adc(c_to_adc(200), c_to_adc(25)); run('0.5')
 send('G92 X100 Y100 Z5 E0\n'); run('0.1')
 # 3. G26, stopped with M410 during the first circle.
 mark('g26'); send('G26 H200 B0 P1\n'); run('8.0')

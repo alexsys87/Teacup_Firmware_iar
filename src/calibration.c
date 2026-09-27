@@ -278,8 +278,10 @@ void cal_la_pattern(int32_t k0, int32_t k1, int32_t kstep, uint32_t slow,
 
     queue_wait();                         // Queued moves keep their K.
     settings.la_k = (uint32_t)k;
-    sersendf_P(("echo:LA pattern line %lu: K%lu.%04lu\n"), (uint32_t)(i + 1),
-               (uint32_t)k / 10000, (uint32_t)k % 10000);
+    // K with four decimals (sendf has no field width).
+    sersendf_P(("echo:LA pattern line %lu: K%lu.%lu%lu%lu%lu\n"), (uint32_t)(i + 1),
+               (uint32_t)k / 10000, (uint32_t)k / 1000 % 10,
+               (uint32_t)k / 100 % 10, (uint32_t)k / 10 % 10, (uint32_t)k % 10);
     cal_travel(x0, y, z);
     cal_line(x0 + 20000, y, slow);
     cal_line(x0 + 60000, y, fast);
@@ -323,7 +325,8 @@ void cal_is_tower(uint32_t f0, uint32_t f1, int32_t height, uint32_t speed,
     shaper_configure();
     if (z / 5000 != last_report) {
       last_report = z / 5000;
-      sersendf_P(("echo:IS tower Z%lq F%lu.%02lu\n"), z, f / 100, f % 100);
+      sersendf_P(("echo:IS tower Z%lq F%lu.%lu%lu\n"), z, f / 100, f / 10 % 10,
+                 f % 10);
     }
     cal_move(x0, y0, z, 0, CAL_TRAVEL_F);
     cal_line(x0 + side, y0, feed);
