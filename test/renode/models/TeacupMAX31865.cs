@@ -89,6 +89,8 @@ namespace Antmicro.Renode.Peripherals.SPI
             count = 0;
         }
 
+        // Chip select state, for the bus model (TeacupSPIMux).
+        public bool Selected => selected;
         public double Resistance { get; set; }
         public double Rref { get; set; }
         public bool Fault { get; set; }

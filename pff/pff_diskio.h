@@ -37,7 +37,7 @@ typedef enum {
 DSTATUS disk_initialize (void);
 #if PF_USE_READ
   DRESULT disk_readp (BYTE* buffer, DWORD sector, UINT offset, UINT count);
-  DRESULT disk_parsep (DWORD sector, UINT offset, UINT* count,
+  DRESULT disk_parsep (DWORD sector, UINT offset, UINT* count, UINT max,
                        uint8_t (*parser)(uint8_t));
 #endif
 #if PF_USE_WRITE

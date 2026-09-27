@@ -51,6 +51,12 @@
   - pf_parse_line() and disk_parsep(): read a file line by line into the
     G-code parser without a sector buffer. New result FR_END_OF_FILE.
   - pf_readdir(): doesn't leave a pointer to its stack buffer behind.
+  - pf_parse_line(): stops at the end of the file (not of its last
+    sector), skips empty lines, ends a last line without a line end. The
+    line end goes to the parser after the sector transfer, with the card
+    deselected: the parser executes the command then, which may use the
+    SPI bus (flash, MAX31865) or even the file (M26, M23).
+  - Lower case file names are accepted (converted to upper case).
 */
 
 #include "sd.h"         /* Teacup: defines SD when configured */
@@ -1010,14 +1016,14 @@ FRESULT pf_read (
 
 
 FRESULT pf_parse_line (
-    uint8_t (*parser)(uint8_t)    /* Pointer to the parser function, which
-                                    should return 1 on EOL, else zero. */
+    uint8_t (*parser)(uint8_t)    /* Pointer to the parser function. It gets
+                                    the characters of one line, then '\n'. */
 )
 {
     DRESULT dr;
     CLUST clst;
-    DWORD sect;
-    UINT rcnt;
+    DWORD sect, remain;
+    UINT rcnt, max, parsed = 0;
     BYTE cs;
     FATFS *fs = FatFs;
 
@@ -1041,14 +1047,28 @@ FRESULT pf_parse_line (
             if (!sect) ABORT(FR_DISK_ERR);
             fs->dsect = sect + cs;
         }
-        dr = disk_parsep(fs->dsect, (UINT)fs->fptr % 512, &rcnt, parser);
+        /* Not beyond the end of the file: the rest of the sector is junk. */
+        max = 512 - (UINT)fs->fptr % 512;
+        remain = fs->fsize - fs->fptr;
+        if (remain < max) max = (UINT)remain;
+        dr = disk_parsep(fs->dsect, (UINT)fs->fptr % 512, &rcnt, max, parser);
         if (dr != RES_OK && dr != RES_EOL_FOUND)
           ABORT(FR_DISK_ERR);
         fs->fptr += rcnt;                           /* Update pointers and counters */
-        if (dr == RES_EOL_FOUND)
-          return FR_OK;
+        if (dr == RES_EOL_FOUND) {
+            if (parsed || rcnt > 1) {               /* Not an empty line? */
+                parser('\n');                       /* Card deselected now. */
+                return FR_OK;
+            }
+        }
+        else
+            parsed += rcnt;
     }
 
+    if (parsed) {                                   /* Last line without EOL. */
+        parser('\n');
+        return FR_OK;
+    }
     return FR_END_OF_FILE;
 }
 

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include "spi.h"
 #include "delay.h"
+#include "watchdog.h"
 
 /* Definitions for MMC/SDC command. */
 #define CMD0    (0x40 + 0)  /* GO_IDLE_STATE */
@@ -110,8 +111,11 @@ DSTATUS disk_initialize(void) {
         /* The card can work at Vdd range of 2.7 - 3.6V. */
 
         /* Wait for leaving idle state (ACMD41 with HCS bit). */
-        for (timeout = 10000; timeout && send_cmd(ACMD41, 1UL << 30); timeout--)
+        /* Cards take up to 1 s, longer than the watchdog timeout. */
+        for (timeout = 10000; timeout && send_cmd(ACMD41, 1UL << 30); timeout--) {
+          wd_reset();
           delay_us(100);
+        }
 
         /* Find out whether it's a block device (CCS bit in OCR). */
         if (timeout && send_cmd(CMD58, 0) == 0) {
@@ -130,8 +134,10 @@ DSTATUS disk_initialize(void) {
       }
 
       /* Wait for leaving idle state. */
-      for (timeout = 10000; timeout && send_cmd(cmd, 0); timeout--)
+      for (timeout = 10000; timeout && send_cmd(cmd, 0); timeout--) {
+        wd_reset();
         delay_us(100);
+      }
 
       /* Set R/W block length to 512. */
       if ( ! timeout || send_cmd(CMD16, 512) != 0)
@@ -213,26 +219,32 @@ DRESULT disk_readp(BYTE* buffer, DWORD sector, UINT offset, UINT count) {
 
   \param sector  Sector number (LBA).
   \param offset  Offset into the sector.
-  \param count   Number of bytes read.
-  \param parser  Pointer to the parser function, which should return 1 on EOL,
-                 else zero.
+  \param count   Number of bytes read, including the line end.
+  \param max     Read at most this many bytes (up to the end of the sector
+                 or of the file).
+  \param parser  Pointer to the parser function.
 
-  \return RES_OK on success, else RES_ERROR.
+  \return RES_EOL_FOUND if a line end was found, RES_OK if not, else
+          RES_ERROR.
 
   This starts reading a sector at offset and sends each character to the
-  parser. The parser reports back whether an end of line (EOL) was reached,
-  which ends this function. If end of the sector is reached without finding
-  an EOL, this function should be called again with the next sector of the
-  file.
+  parser, up to a line end ('\n' or '\r') or max bytes. If end of the sector
+  is reached without finding an EOL, this function should be called again
+  with the next sector of the file.
+
+  The line end itself does not go to the parser: the parser executes the
+  command on it, which may use the SPI bus (SPI flash, MAX31865 on the same
+  bus) and must not happen with the card selected. pf_parse_line() sends
+  it after this function has deselected the card.
 
   Reading lines of code this way should be more efficient than reading all the
   bytes into a small, not line-aligned buffer, just to read this buffer(s)
   right again byte by byte for parsing. It makes buffering entirely obsolete.
 */
-DRESULT disk_parsep(DWORD sector, UINT offset, UINT* count,
+DRESULT disk_parsep(DWORD sector, UINT offset, UINT* count, UINT max,
                     uint8_t (*parser)(uint8_t)) {
   DRESULT result;
-  BYTE token = 0xFF;
+  BYTE token = 0xFF, c;
   uint16_t timeout;
   UINT trailing = 514 - offset, read = 0;  /* 514 = block size + 2 bytes CRC */
   uint8_t eol = 0;
@@ -254,16 +266,21 @@ DRESULT disk_parsep(DWORD sector, UINT offset, UINT* count,
       while (offset--)
         spi_rw(0xFF);
 
-      /* Receive and parse the sector up to EOL or end of the sector. */
-      do {
+      /* Receive and parse the sector up to EOL or max bytes. */
+      while (read < max) {
         /**
           Note that this isn't optimised for performance. See
           http://www.matuschek.net/atmega-spi/.
         */
-        eol = parser(spi_rw(0xFF));
+        c = spi_rw(0xFF);
         read++;
         trailing--;
-      } while (trailing > 2 && ! eol);
+        if (c == '\n' || c == '\r') {
+          eol = 1;
+          break;
+        }
+        parser(c);
+      }
 
       *count = read;
 

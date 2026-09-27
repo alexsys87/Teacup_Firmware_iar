@@ -17,6 +17,9 @@
 static FATFS sdfile;
 static FRESULT result;
 
+/// Name of the open file (8.3 plus path, as given to M23).
+static char open_name[32];
+
 /** Initialize SPI for SD card reading.
 */
 void sd_init(void) {
@@ -24,12 +27,18 @@ void sd_init(void) {
   SET_OUTPUT(SD_CARD_SELECT_PIN);
 }
 
-/** Mount the SD card.
+/** Mount the SD card (M21, and once at startup).
+
+  Messages as Marlin's, hosts look for them.
 */
 void sd_mount(void) {
+  gcode_sources &= (uint8_t)~GCODE_SOURCE_SD;
+  open_name[0] = '\0';
   result = pf_mount(&sdfile);
-  if (result != FR_OK)
-    sersendf_P(("echo:SD init failed. (%su)\n"), result);
+  if (result == FR_OK)
+    serial_writestr("echo:SD card ok\n");
+  else
+    sersendf_P(("echo:SD init fail (%su)\n"), result);
 }
 
 /** Unmount the SD card.
@@ -39,39 +48,77 @@ void sd_mount(void) {
   as inserting and mounting another one without previous unmounting.
 */
 void sd_unmount(void) {
+  gcode_sources &= (uint8_t)~GCODE_SOURCE_SD;
+  open_name[0] = '\0';
   pf_unmount(&sdfile);
 }
 
-/** List a given directory.
+/** List a directory, with the subdirectories.
+
+  \param path  Path of the directory, "" for the top level.
+  \param depth Levels of subdirectories still to list.
+
+  Files as "NAME.GCO size", in subdirectories "DIR/NAME.GCO size", like
+  Marlin's M20: hosts (OctoPrint, Pronterface) take the name up to the
+  space. Hidden and system entries (e.g. "System Volume Information") are
+  left out.
+*/
+static void list_dir(char *path, uint8_t depth) {
+  FILINFO fno;
+  DIR dir;
+  uint8_t len, i;
+
+  if (pf_opendir(&dir, path[0] ? path : "/") != FR_OK)
+    return;
+  for (;;) {
+    if (pf_readdir(&dir, &fno) != FR_OK || fno.fname[0] == 0)
+      break;
+    if (fno.fattrib & (AM_HID | AM_SYS))
+      continue;
+    if (fno.fattrib & AM_DIR) {
+      // Append "/NAME" to the path (the caller's buffer holds 2 levels).
+      if (depth == 0 || fno.fname[0] == '.')
+        continue;
+      for (len = 0; path[len]; len++) ;
+      if (len)
+        path[len++] = '/';
+      for (i = 0; fno.fname[i]; i++)
+        path[len + i] = fno.fname[i];
+      path[len + i] = '\0';
+      list_dir(path, depth - 1);
+      path[len ? len - 1 : 0] = '\0';
+      continue;
+    }
+    if (path[0]) {
+      serial_writestr(path);
+      serial_writechar('/');
+    }
+    serial_writestr(fno.fname);
+    serial_writechar(' ');
+    serwrite_uint32(fno.fsize);
+    serial_writechar('\n');
+    delay_ms(2); // Time for sending the characters.
+  }
+}
+
+/** List the card (M20).
 
   \param path The path to list. Toplevel path is "/".
-
-  A slash is added to directory names, to make it easier for users to
-  recognize them.
 */
 void sd_list(const char* path) {
-  FILINFO fno;
+  char p[40];
   DIR dir;
 
   result = pf_opendir(&dir, path);
-  if (result == FR_OK) {
-    // Markers expected by Pronterface, OctoPrint & co.
-    serial_writestr("Begin file list\n");
-    for (;;) {
-      result = pf_readdir(&dir, &fno);
-      if (result != FR_OK || fno.fname[0] == 0)
-        break;
-      serial_writestr(fno.fname);
-      if (fno.fattrib & AM_DIR)
-        serial_writechar('/');
-      serial_writechar('\n');
-      delay_ms(2); // Time for sending the characters.
-    }
-    serial_writestr("End file list\n");
-  }
-  else {
+  if (result != FR_OK) {
     sersendf_P(("echo:Failed to open dir. (%su)\n"), result);
+    return;
   }
+  // Markers expected by Pronterface, OctoPrint & co.
+  serial_writestr("Begin file list\n");
+  p[0] = '\0';
+  list_dir(p, 2);
+  serial_writestr("End file list\n");
 }
 
 /** Open a file for reading.
@@ -81,21 +128,26 @@ void sd_list(const char* path) {
   Before too long this will cause the printer to read G-code from this file
   until done or until stopped by G-code coming in over the serial line.
 */
-/// Name of the open file (8.3 plus path, as given to M23).
-static char open_name[32];
-
 void sd_open(const char* filename) {
   uint8_t i;
 
   open_name[0] = '\0';
   result = pf_open(filename);
   if (result != FR_OK) {
-    sersendf_P(("echo:Failed to open file. (%su)\n"), result);
+    // Marlin's message, hosts look for it.
+    serial_writestr("echo:open failed, File: ");
+    serial_writestr(filename);
+    serial_writestr(".\n");
     return;
   }
   for (i = 0; filename[i] && i < sizeof(open_name) - 1; i++)
     open_name[i] = filename[i];
   open_name[i] = '\0';
+  serial_writestr("File opened: ");
+  serial_writestr(filename);
+  serial_writestr(" Size: ");
+  serwrite_uint32(sdfile.fsize);
+  serial_writestr("\nFile selected\n");
 }
 
 uint32_t sd_position(void) {

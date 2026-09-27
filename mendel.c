@@ -111,6 +111,12 @@ static void init(void) {
     spi_flash_init();
   #endif
 
+  // Mount the card, so M20..M24 and M1000 work without M21 (a missing card
+  // just reports "SD init fail").
+  #ifdef SD_CARD
+    sd_mount();
+  #endif
+
   // Runtime settings: stored ones from Flash, or the configured defaults.
   settings_init();
 
