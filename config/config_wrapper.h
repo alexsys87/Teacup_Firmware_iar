@@ -136,6 +136,15 @@
 #endif
 
 /**
+  Buttons on the PCF8574 expander (menu): up, down and OK at least.
+*/
+#if defined PCF8574_ADDRESS && defined BUTTON_UP_BIT && \
+    defined BUTTON_DOWN_BIT && defined BUTTON_OK_BIT
+  #define BUTTONS
+  #define EXPANDER_INPUTS
+#endif
+
+/**
   Check wether we need I2C.
 */
 #if defined DISPLAY_BUS_I2C || defined PCF8574_ADDRESS

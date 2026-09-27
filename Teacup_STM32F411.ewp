@@ -2338,6 +2338,12 @@
         <file>
             <name>$PROJ_DIR$\core\print_stats.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\expander.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\core\buttons.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>
@@ -2351,10 +2357,13 @@
             <name>$PROJ_DIR$\display\display_ssd1306.c</name>
         </file>
         <file>
-            <name>$PROJ_DIR$\display\font_8x4.c</name>
+            <name>$PROJ_DIR$\display\font_6x8.c</name>
         </file>
         <file>
             <name>$PROJ_DIR$\display\parallel-4bit.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\display\ui.c</name>
         </file>
     </group>
     <group>

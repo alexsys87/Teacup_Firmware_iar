@@ -29,6 +29,12 @@ void job_stop_idle(void);
 /// Whether the timer runs.
 uint8_t job_running(void);
 
+/// Whether the job is paused (M25, M76).
+uint8_t job_paused(void);
+
+/// Time of the current / last print, s.
+uint32_t job_elapsed_s(void);
+
 /// Filament fed by a move while the timer runs, um (dda_create()).
 void job_add_filament(uint32_t um);
 

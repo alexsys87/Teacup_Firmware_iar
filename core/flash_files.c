@@ -287,6 +287,30 @@ const char *sd_file_name(void) {
   return rd_name;
 }
 
+uint32_t sd_file_size(void) {
+  return rd_open ? rd_size : 0;
+}
+
+uint8_t sd_dir_entry(const char *path, uint16_t index, char *name) {
+  uint16_t i;
+  dir_entry_t e;
+
+  (void)path;                             // No directories in the flash.
+  if ( ! spi_flash_present())
+    return SD_ENTRY_ERROR;
+  for (i = 0; i < DIR_ENTRIES; i++) {
+    read_entry(i, &e);
+    if (e.magic == ERASED)
+      break;
+    if (entry_valid(&e) && index-- == 0) {
+      memcpy(name, e.name, 12);
+      name[12] = '\0';
+      return SD_ENTRY_FILE;
+    }
+  }
+  return SD_ENTRY_NONE;
+}
+
 /* ---- Writing ---- */
 
 uint8_t sd_writing(void) {

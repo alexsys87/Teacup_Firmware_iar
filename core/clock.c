@@ -17,6 +17,8 @@
 #include "temp.h"
 #include "timer.h"
 #include "display.h"
+#include "ui.h"
+#include "buttons.h"
 #include "atomic.h"
 #include "emergency_parser.h"
 #include "gcode_queue.h"
@@ -112,9 +114,6 @@ static void clock_250ms(void) {
   ifclock(clock_flag_1s) {
     static uint8_t wait_for_temp = 0;
 
-    #ifdef DISPLAY
-      display_clock();
-    #endif
 
     temp_residency_tick();
     temp_periodic_print();
@@ -181,6 +180,12 @@ static void clock_10ms(void) {
   #ifdef PCF8574_ADDRESS
     expander_tick();
   #endif
+  #ifdef BUTTONS
+    buttons_tick();
+  #endif
+  #ifdef DISPLAY
+    ui_tick();
+  #endif
   filament_tick();
   babystep_tick();
 
@@ -212,5 +217,6 @@ void clock_poll(void) {
 
   #ifdef DISPLAY
     display_tick();
+    display_update();
   #endif
 }

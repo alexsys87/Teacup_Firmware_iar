@@ -48,6 +48,25 @@ uint32_t sd_position(void);
 /// Name of the file opened last (M23), "" if none.
 const char *sd_file_name(void);
 
+/// Size of the open file, bytes.
+uint32_t sd_file_size(void);
+
+/// Result of sd_dir_entry().
+enum {
+  SD_ENTRY_NONE = 0,    ///< No entry with this index (end of the list).
+  SD_ENTRY_FILE,
+  SD_ENTRY_DIR,
+  SD_ENTRY_ERROR        ///< No card / not mounted / no such directory.
+};
+
+/**
+  Entry 'index' of a directory, for the menu: subdirectories and G-code
+  files (extension starting with G: .GCO, .G, .GC), no hidden ones.
+  \param path  Directory, "" or "/" for the top level.
+  \param name  Receives the 8.3 name, 13 bytes.
+*/
+uint8_t sd_dir_entry(const char *path, uint16_t index, char *name);
+
 #ifdef SD_FLASH
   /// Upload in progress (M28 until M29).
   uint8_t sd_writing(void);

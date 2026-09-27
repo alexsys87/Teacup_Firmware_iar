@@ -1,64 +1,19 @@
-
 /** \file
 
-  \brief Code specific to the SSD1306 display.
-*/
+  \brief Code specific to the SSD1306 display (and SH1106).
 
-/**
-  D'oh. Shortly before completing this code, the display hardware died. Shows
-  just black, for whatever reason. Accordingly I can't test new code any longer
-  and writing code without seeing what it does makes no sense.
+  OLED with 128x64 pixels (DISPLAY_HEIGHT 64, the 0.96" modules) or 128x32
+  (DISPLAY_HEIGHT 32, 0.91"), on I2C. Text in a grid of 6x8 pixel cells
+  (font_6x8.c): 21 characters, 8 or 4 lines, one line per display page.
 
-  What already works:
+  SH1106 (the 1.3" modules): the same commands in page addressing mode, but
+  132 columns RAM with the visible 128 in the middle, DISPLAY_SH1106 shifts
+  by 2. DISPLAY_ROTATE_180 turns the picture for modules mounted upside
+  down.
 
-    - I2C with a queue for small transmissions. Sufficient to queue up sending
-      a rendered character. It's filled by displaybus_write() and drained by
-      the I2C interrupt. Larger transmissions are handled fine, too, but cause
-      wait cycles.
-
-    - 128 byte queue holding characters to send. This queue is filled by
-      display_writechar(). It's drained by display_tick(), which processes,
-      renders and forwards these characters to the I2C queue.
-
-    - Display initialisation.
-
-    - Clearing the display.
-
-    - Writing text with display_writestr_P().
-
-    - Writing formatted text with sendf_P(display_writechar, ...).
-
-    - Current state of code should clear the display at startup, show a
-      greeting message and start displaying current X/Y/Z coordinates, updated
-      once per second. All this not in a particularly pretty fashion, but
-      working.
-
-  TODO list:
-
-    - Lot's of prettification. Like a nice background picture with the Teacup
-      logo, like "Welcome to Teacup" as a greeting screen, like writing numbers
-      to readable places and so on.
-
-    - Allow different fonts. Already paraphrased in font.h and font.c. Needs
-      a selection menu in Configtool, of course, the same way one can select
-      display types.
-
-    - It's a bit unclear wether this 'last_byte' flag to displaybus_write() is
-      really ideal. Fact is, I2C transmissions need a start and an explicite
-      ending. Also thinkable would be a displaybus_finalise() function
-      which puts the marker in place. Saves a lot of shuffling parameters
-      around.
-
-      Yet another option would be to make sure the I2C send buffer is drained
-      befpre sending the next transmission. I2C code already finalises a
-      transmission on buffer drain, so only _reliable_ waiting needs an
-      implementation.
-
-      Each variant needs testing, which one gets away with the smallest code.
-      Smallest code is likely the fastest code as well.
-
-    - Here's an assistant to convert pictures/bitmaps into C code readable by
-      the compiler: http://en.radzio.dxp.pl/bitmap_converter/
+  Data path: display_writechar() queues characters and cursor commands
+  (128 bytes), display_tick() renders one of them when the I2C bus is idle
+  and puts the bytes into the I2C queue (drained by its interrupt).
 */
 
 #include "display.h"
@@ -66,102 +21,83 @@
 #if defined DISPLAY && defined DISPLAY_TYPE_SSD1306
 
 #include "displaybus.h"
-#include "status.h"
 
 #define BUFSIZE DISPLAY_BUFFER_SIZE
 #include "ringbuffer.h"
 #include "font.h"
-#include "sendf.h"
 #include "delay.h"
-#include "dda.h"
 
+#ifdef DISPLAY_SH1106
+  #define COLUMN_OFFSET 2
+#else
+  #define COLUMN_OFFSET 0
+#endif
+/// Text starts at this pixel column: 21 cells of 6 = 126, centred.
+#define TEXT_OFFSET   (COLUMN_OFFSET + 1)
 
 static const uint8_t init_sequence[] = {
   0x00,             // Command marker.
   0xAE,             // Display off.
   0xD5, 0x80,       // Display clock divider (reset).
-  0xA8, 0x1F,       // 1/32 duty.
-  0x40 | 0x00,      // Start line (reset).
+  0xA8, DISPLAY_HEIGHT - 1,   // Multiplex ratio: 1/64 or 1/32 duty.
+  0xD3, 0x00,       // No display offset.
+  0x40 | 0x00,      // Start line 0.
   0x20, 0x02,       // Page addressing mode (reset).
-  0x22, 0x00, 0x03, // Start and end page in horiz./vert. addressing mode[1].
-  0x21, 0x00, 0x7F, // Start and end column in horiz./vert. addressing mode.
-  0xA0 | 0x00,      // No segment remap (reset).
-  0xC0 | 0x00,      // Normal com pins mapping (reset).
-  0xDA, 0x02,       // Sequental without remap com pins.
+  #ifdef DISPLAY_ROTATE_180
+    0xA0,           // No segment remap.
+    0xC0,           // COM scan up.
+  #else
+    0xA1,           // Segment remap: column 127 is SEG0 (usual mounting).
+    0xC8,           // COM scan down.
+  #endif
+  #if DISPLAY_HEIGHT == 64
+    0xDA, 0x12,     // Alternative COM pins (128x64).
+  #else
+    0xDA, 0x02,     // Sequential COM pins (128x32).
+  #endif
   0x81, 0x7F,       // Contrast (reset).
-  0xDB, 0x20,       // Vcomh (reset).
   0xD9, 0xF1,       // Precharge period.
-  0x8D, 0x14,       // Charge pump.
+  0xDB, 0x20,       // Vcomh (reset).
+  0x8D, 0x14,       // Charge pump on.
   0xA6,             // Positive display.
-  0xA4,             // Resume display.
+  0xA4,             // Show RAM content.
   0xAF              // Display on.
 };
-// [1] Do not set this to 0x00..0x07 on a 32 pixel high display, or vertical
-//     addressing mode will mess up. 32 pixel high displays have only 4 pages
-//     (0..3), still addressing logic accepts, but can't deal with the 0..7
-//     meant for 64 pixel high displays.
+
+/// Set the RAM position: page (text line) and pixel column.
+static void set_position(uint8_t page, uint8_t column) {
+  displaybus_write(0x00, 0);                    // Command marker.
+  displaybus_write(0xB0 | (page & 0x07), 0);
+  displaybus_write(0x00 | (column & 0x0F), 0);
+  displaybus_write(0x10 | ((column >> 4) & 0x0F), 1);
+}
 
 /**
- * Initializes the display's controller configuring the way of
- * displaying data.
- */
+  Initializes the display's controller configuring the way of
+  displaying data.
+*/
 void display_init(void) {
   uint8_t i;
 
-  displaybus_init(DISPLAY_I2C_ADDRESS);
+  displaybus_init(DISPLAY_I2C_ADDRESS << 1);
 
   for (i = 0; i < sizeof(init_sequence); i++) {
     // Send last byte with 'last_byte' set.
     displaybus_write(init_sequence[i], (i == sizeof(init_sequence) - 1));
   }
+  display_clear();
+  while (buf_canread(display))
+    display_tick();
+  display_text_reset();
 }
 
 /**
-  Show a nice greeting. Pure eye candy.
+  Show the name until the status screen takes over.
 */
 void display_greeting(void) {
-
-  display_clear();
-
-  /**
-    "Welcome to Teacup" is 64 pixel columns wide, entire display is
-    128 columns, so we offset by 32 columns to get it to the center.
-  */
-  display_set_cursor(1, 32);
-
-  display_writestr_P(("Welcome to Teacup"));
-
-  // Forward this to the display immediately.
-  while (buf_canread(display)) {
-    display_tick();
-  }
-
-  // Allow the user to worship our work for a moment :-)
-  delay_ms(5000);
-}
-
-/**
-  Regular update of the display. Typically called once a second from clock.c.
-*/
-void display_clock(void) {
-
-  display_set_cursor(0, 2);
-  update_current_position();
-  sendf_P(display_writechar, ("X:%lq Y:%lq Z:%lq  F:%lu  "),
-          current_position.axis[X], current_position.axis[Y],
-          current_position.axis[Z], current_position.F);
-
-  #if DISPLAY_LINES > 2
-    // Status message (M117) on the last line, padded to clear old text.
-    {
-      const char *msg = status_get_message();
-      uint8_t i;
-
-      display_set_cursor(DISPLAY_LINES - 1, 0);
-      for (i = 0; i < DISPLAY_SYMBOLS_PER_LINE; i++)
-        display_writechar(*msg ? (uint8_t)*msg++ : ' ');
-    }
-  #endif
+  display_text_clear();
+  display_text(DISPLAY_LINES / 2 - 1, 7, "Teacup");
+  display_text(DISPLAY_LINES / 2, 5, "STM32F4x1");
 }
 
 /**
@@ -169,7 +105,8 @@ void display_clock(void) {
   queue.
 */
 void display_tick(void) {
-  uint16_t i, data, index;
+  uint16_t i;
+  uint8_t data, line, column;
 
   if (displaybus_busy()) {
     return;
@@ -189,25 +126,16 @@ void display_tick(void) {
     switch (data) {
       case low_code_clear:
         /**
-          Clear the screen. As this display supports many sophisticated
-          commands, but not a simple 'clear', we have to overwrite the entire
-          memory with zeros, byte by byte.
+          Clear the screen. The display has no 'clear' command, so write
+          zeros, page by page (works on the SH1106 as well, which has no
+          horizontal addressing mode).
         */
-        // Set horizontal adressing mode.
-        displaybus_write(0x00, 0);
-        displaybus_write(0x20, 0);
-        displaybus_write(0x00, 1);
-
-        // Write 512 zeros.
-        displaybus_write(0x40, 0);
-        for (i = 0; i < 512; i++) {
-          displaybus_write(0x00, (i == 511));
+        for (line = 0; line < DISPLAY_LINES; line++) {
+          set_position(line, 0);
+          displaybus_write(0x40, 0);            // Data marker.
+          for (i = 0; i < 128 + 2 * COLUMN_OFFSET; i++)
+            displaybus_write(0x00, (i == 128 + 2 * COLUMN_OFFSET - 1));
         }
-
-        // Return to page adressing mode.
-        displaybus_write(0x00, 0);
-        displaybus_write(0x20, 0);
-        displaybus_write(0x02, 1);
         break;
 
       case low_code_set_cursor:
@@ -217,36 +145,25 @@ void display_tick(void) {
           This is a three-byte control command, so we fetch additional bytes
           from the queue and cross fingers they're actually there.
         */
-        // Enter command mode.
-        displaybus_write(0x00, 0);
-        // Set line.
-        buf_pop(display, data);
-        displaybus_write(0xB0 | (data & 0x03), 0);
-        // Set column.
-        buf_pop(display, data);
-        displaybus_write(0x00 | (data & 0x0F), 0);
-        displaybus_write(0x10 | ((data >> 4) & 0x0F), 1);
+        buf_pop(display, line);
+        buf_pop(display, column);
+        set_position(line, (uint8_t)(TEXT_OFFSET +
+                     column * (FONT_COLUMNS + FONT_SYMBOL_SPACE)));
         break;
 
       default:
         // Should be a printable character.
-        index = data - 0x20;
+        if (data < 0x20 || data > 0x7E)
+          data = '?';
 
         // Write pixels command.
         displaybus_write(0x40, 0);
 
-        // Send the character bitmap.
-        #ifdef FONT_IS_PROPORTIONAL
-          for (i = 0; i < (font[index].columns); i++) {
-        #else
-          for (i = 0; i < FONT_COLUMNS; i++) {
-        #endif
-            displaybus_write((font[index].data[i]), 0);
-        }
-        // Send space between characters.
-        for (i = 0; i < FONT_SYMBOL_SPACE; i++) {
+        // Send the character bitmap and the space after it.
+        for (i = 0; i < FONT_COLUMNS; i++)
+          displaybus_write(font[data - 0x20].data[i], 0);
+        for (i = 0; i < FONT_SYMBOL_SPACE; i++)
           displaybus_write(0x00, (i == FONT_SYMBOL_SPACE - 1));
-        }
         break;
     }
   }

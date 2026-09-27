@@ -154,6 +154,42 @@ uint32_t sd_position(void) {
   return sdfile.fptr;
 }
 
+uint32_t sd_file_size(void) {
+  return open_name[0] ? sdfile.fsize : 0;
+}
+
+/// Whether an 8.3 name has an extension starting with 'G'.
+static uint8_t is_gcode(const char *name) {
+  while (*name && *name != '.')
+    name++;
+  return name[0] == '.' && name[1] == 'G';
+}
+
+uint8_t sd_dir_entry(const char *path, uint16_t index, char *name) {
+  FILINFO fno;
+  DIR dir;
+  uint8_t i;
+
+  if (pf_opendir(&dir, path[0] ? path : "/") != FR_OK)
+    return SD_ENTRY_ERROR;
+  for (;;) {
+    if (pf_readdir(&dir, &fno) != FR_OK)
+      return SD_ENTRY_ERROR;
+    if (fno.fname[0] == 0)
+      return SD_ENTRY_NONE;
+    if ((fno.fattrib & (AM_HID | AM_SYS)) || fno.fname[0] == '.')
+      continue;
+    if ( ! (fno.fattrib & AM_DIR) && ! is_gcode(fno.fname))
+      continue;
+    if (index-- == 0)
+      break;
+  }
+  for (i = 0; fno.fname[i] && i < 12; i++)
+    name[i] = fno.fname[i];
+  name[i] = '\0';
+  return (fno.fattrib & AM_DIR) ? SD_ENTRY_DIR : SD_ENTRY_FILE;
+}
+
 const char *sd_file_name(void) {
   return open_name;
 }

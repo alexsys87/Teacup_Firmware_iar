@@ -16,8 +16,8 @@
     PA3   UART RX (host)           PB3   Y_MIN        (EXTI3)
     PA4   SPI flash CS             PB4   E_STEP       (TIM3_CH1)
     PA5   SPI SCK                  PB5   E_DIR
-    PA6   SPI MISO                 PB6   I2C1 SCL: display, PCF8574 (*)
-    PA7   SPI MOSI                 PB7   I2C1 SDA: display, PCF8574 (*)
+    PA6   SPI MISO                 PB6   I2C1 SCL: display, PCF8574
+    PA7   SPI MOSI                 PB7   I2C1 SDA: display, PCF8574
     PA8   X_STEP       (TIM1_CH1)  PB8   hotend heater (TIM10_CH1)
     PA9   X_DIR                    PB9   part fan      (TIM11_CH1)
     PA10  Y_DIR                    PB10  X_MIN        (EXTI10)
@@ -234,9 +234,8 @@
                                  CS (HOTEND_MAX31865 below); PC14/PC15 are
                                  the 32.768 kHz crystal: remove it (the
                                  firmware doesn't use the LSE)
-    display               I2C1   PB6/PB7 (SSD1306 or HD44780 + PCF8574)
-    encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27,
-    beeper                       P0..P5 (P6 / P7: fans, see PCF8574_ADDRESS)
+    encoder, beeper       I2C1   PCF8574 I/O expander, P4 / P5 (P0..P3:
+                                 buttons, P6 / P7: fans, see below)
 
   PC13..PC15: low speed (2 MHz), 3 mA, never a current source. Fine for a
   servo signal, a chip select and inputs.
@@ -251,8 +250,8 @@
   go to a PCF8574 I/O expander on I2C1 (PB6/PB7), 7 bit address
   PCF8574_ADDRESS (0x20: A0..A2 to GND), outputs P6 and P7. A PCF8574
   output is only a weak pull-up when high: each fan through a MOSFET
-  module with a 10 k pull-up to 5 V at its input ("high = on"). P0..P5
-  stay free (inputs) for encoder, buttons and beeper. Without an expander
+  module with a 10 k pull-up to 5 V at its input ("high = on"). P0..P3
+  are the menu buttons (DISPLAY_MENU below), P4 / P5 stay free. Without an expander
   nothing happens (the writes aren't acknowledged), fans on 12 V directly
   run all the time as before. An MCU pin instead: HOTEND_FAN_PIN /
   CONTROLLER_FAN_PIN (active high, *_FAN_INVERT for active low).
@@ -260,6 +259,50 @@
 #define PCF8574_ADDRESS          0x20
 #define HOTEND_FAN_EXPANDER_BIT  6
 #define CONTROLLER_FAN_EXPANDER_BIT 7
+
+/** \def DISPLAY_TYPE_SSD1306 DISPLAY_TYPE_HD44780 DISPLAY_I2C_ADDRESS
+  Display on I2C1 (PB6/PB7), together with the PCF8574 of the buttons and
+  fans. One of:
+
+   - DISPLAY_TYPE_SSD1306: OLED 128x64 (0.96", 21x8 characters), address
+     0x3C (0x3D with the address resistor moved). DISPLAY_HEIGHT 32 for
+     the 128x32 ones (0.91", 21x4), DISPLAY_SH1106 for the 1.3" modules
+     with an SH1106, DISPLAY_ROTATE_180 for one mounted upside down.
+
+   - DISPLAY_TYPE_HD44780: character LCD 20x4 with the usual PCF8574
+     backpack ("LCD2004 I2C"), address 0x27 (PCF8574T) or 0x3F
+     (PCF8574AT). DISPLAY_COLS / DISPLAY_LINES for 16x2, 20x2 or 16x4.
+
+  Both run on 3.3 V logic: the OLED directly; the LCD needs 5 V supply,
+  its backpack pulls SDA/SCL up to 5 V - PB6/PB7 tolerate that (FT pins).
+  Without a display nothing changes.
+*/
+//#define DISPLAY_TYPE_SSD1306
+//#define DISPLAY_TYPE_HD44780
+#if defined DISPLAY_TYPE_SSD1306 || defined DISPLAY_TYPE_HD44780
+  #define DISPLAY_BUS_I2C
+#endif
+//#define DISPLAY_HEIGHT           32
+//#define DISPLAY_SH1106
+//#define DISPLAY_I2C_ADDRESS      0x3F
+//#define DISPLAY_COLS             16
+//#define DISPLAY_LINES            2
+
+/** \def DISPLAY_MENU BUTTON_UP_BIT BUTTON_DOWN_BIT BUTTON_OK_BIT BUTTON_BACK_BIT
+  Menu on the display, operated with buttons on the PCF8574 (each from its
+  pin to GND): set temperatures, fan, speed, babystep; home, move, level;
+  settings (steps/mm, feedrates, accelerations, jerk, linear advance,
+  probe offset, retract), stored with "Store settings" (M500, SPI flash);
+  print files from the SD card (or SPI flash), pause, resume, stop,
+  filament change; resume after a power loss. Back is optional, each menu
+  has a "Back" item. Without DISPLAY_MENU the display shows the status
+  only.
+*/
+//#define DISPLAY_MENU
+#define BUTTON_UP_BIT            0
+#define BUTTON_DOWN_BIT          1
+#define BUTTON_OK_BIT            2
+#define BUTTON_BACK_BIT          3
 
 /** \def SPI_FLASH
   SPI flash chip (W25Q16..W25Q128) soldered to the footprint on the bottom
@@ -275,7 +318,7 @@
 
 /*
   SPI bus: SPI1 on PA5..PA7, shared by SPI flash and an SD card (if any).
-  I2C1 on PB6/PB7: display and I/O expander (DISPLAY_BUS_I2C).
+  I2C1 on PB6/PB7: display and I/O expander.
 */
 #define SPI_INSTANCE             1
 #define SPI_SCK_PIN              PA_5

@@ -5,27 +5,16 @@
 #include <stdint.h>
 
 /**
-  So far we have only one font and no choice for fonts in Configtool,
-  so just paraphrase handling of distinct fonts.
+  Fixed width font for the pixel displays (SSD1306): 5x7 pixels in a 6x8
+  cell, so 21 characters per line on 128 pixels, text in a grid like on a
+  character LCD. Characters 0x20..0x7E, one byte per column, bit 0 at the
+  top.
 */
-
-//#if defined DISPLAY_FONT_8X4
-
-  #define FONT_ROWS             8
-  #define FONT_COLUMNS          4
-  #define FONT_SYMBOL_SPACE     1
-  #define FONT_IS_PROPORTIONAL
-
-//#elif defined DISPLAY_FONT_...another font
-
-  // ... ...
-
-//#endif
+#define FONT_ROWS             8
+#define FONT_COLUMNS          5
+#define FONT_SYMBOL_SPACE     1
 
 typedef struct {
-  #ifdef FONT_IS_PROPORTIONAL
-    uint8_t columns;
-  #endif
   uint8_t data[FONT_COLUMNS];
 } symbol_t;
 
