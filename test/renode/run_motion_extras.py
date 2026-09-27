@@ -145,8 +145,11 @@ mark('rt_report'); send('M208\n'); run('0.1')
 # ---- M86 host lost ----
 # Hotend at 200 C (thermistor ADC), X and Y homed for parking.
 HOT = c_to_adc(200.0)
-adc(HOT, ROOM); run('0.3')
-send('M104 S200\n'); run('0.3')
+# Target first, then the (simulated) temperature: a jump of 175 C with the
+# heater off is what the thermal protection calls "heater off but
+# temperature rising" (stuck MOSFET).
+send('M104 S200\n'); run('0.1')
+adc(HOT, ROOM); run('0.5')
 # The first G28 lifts Z from 1 to 5 mm first (Z_HOMING_HEIGHT, ~1.2 s).
 mark('hl_home')
 for port, n, ax in (('B', 10, 'X'), ('B', 3, 'Y')):
