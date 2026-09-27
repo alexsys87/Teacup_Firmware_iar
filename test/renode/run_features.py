@@ -300,7 +300,8 @@ for (i, j), z in sorted(mesh.items()):
     x, y = 15 + 87.5 * i, 15 + 75.0 * j
     errs.append(round(z - (bed(x, y) - ZREF), 4))
 check('G29: completes, leveling on', 'echo:Bed Leveling ON' in u and 'ok' in u and not any('rror' in l for l in u), u[:3])
-check('G29: 18 samples, no alarm reset', MODEL.get('g29', {}).get('trig') == 22 and '2193' not in str(MODEL.get('g29', {}).get('servo')),
+# Triggers so far: G28 2, G30 2, M423 G30 2, G29 18.
+check('G29: 18 samples, no alarm reset', MODEL.get('g29', {}).get('trig') == 24 and '2193' not in str(MODEL.get('g29', {}).get('servo')),
       (MODEL.get('g29', {}).get('trig'), MODEL.get('g29', {}).get('servo')))
 check('G29: 9 points = bed heights (+-8 um)', len(errs) == 9 and all(abs(e) <= 0.008 for e in errs), errs)
 check('M420 reports ON, fade 10', 'echo:Bed Leveling ON' in uart('g29_state') and 'echo:Fade Height 10.000' in uart('g29_state'), uart('g29_state')[:3])
