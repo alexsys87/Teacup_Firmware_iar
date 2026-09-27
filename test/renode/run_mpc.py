@@ -8,7 +8,8 @@ temp_dummy_plant: 4 C/s at full power, time constant 40 s towards 25 C,
   run_mpc.py [renode] [teacup.elf]
 
 With P = 40 W the plant is C = 40 / 4 = 10 J/K, A = C / 40 = 0.25 W/K,
-the fan (1.2 C/s at full speed at 150 C) F = A + 1.2 * C / 125 = 0.346.
+the fan (0.6 C/s at full speed at 150 C) F = A + 0.6 * C / 125 = 0.298.
+(1.2 C/s would need 43 W at 150 C: more than the heater has.)
 
 Checks:
   - M306 reports the defaults
@@ -57,7 +58,7 @@ mark('def'); send('M306\n'); run('0.1')
 # temperature: during the cooling phase (fan on at 25 C) it would cool
 # below ambient. So only once the heating has started.
 mark('tune'); send('M306 P40 T S150\n'); run('15.0')
-cmd('sysbus WriteDoubleWord 0x%08X 1200' % FANLOSS)
+cmd('sysbus WriteDoubleWord 0x%08X 600' % FANLOSS)
 for k in range(23):
     run('10.0')
 mark('tuned'); send('M306\n'); run('0.1')
@@ -111,7 +112,7 @@ check('M306 T S150 finishes', any('MPC autotune finished' in l for l in tune), t
 near = lambda v, e, tol: v is not None and abs(v - e) <= tol * e
 check('  C = 10 J/K (+-20 %)', p is not None and near(p[1], 10.0, 0.2), p)
 check('  A = 0.25 W/K (+-20 %)', p is not None and near(p[3], 0.25, 0.2), p)
-check('  F = 0.346 W/K (+-20 %)', p is not None and near(p[4], 0.346, 0.2), p)
+check('  F = 0.298 W/K (+-20 %)', p is not None and near(p[4], 0.298, 0.2), p)
 check('  R plausible (0.2..5 1/s)', p is not None and 0.2 <= p[2] <= 5, p)
 hold = [temp('hold_%d' % k) for k in range(10)]
 check('holds 150 C (+-1)', all(t is not None and abs(t - 150) <= 1.0 for t in hold), hold)
