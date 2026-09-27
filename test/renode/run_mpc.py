@@ -52,10 +52,13 @@ run('0.3')
 cmd('sysbus WriteDoubleWord 0x%08X 100' % FORCE); run('0.5')
 cmd('sysbus WriteDoubleWord 0x%08X 0xFFFFFFFF' % FORCE)
 cmd('sysbus WriteDoubleWord 0x%08X 1' % PLANT)
-cmd('sysbus WriteDoubleWord 0x%08X 1200' % FANLOSS)
 mark('def'); send('M306\n'); run('0.1')
-mark('tune'); send('M306 P40 T S150\n')
-for k in range(24):
+# The fan loss of the plant is constant, not proportional to the
+# temperature: during the cooling phase (fan on at 25 C) it would cool
+# below ambient. So only once the heating has started.
+mark('tune'); send('M306 P40 T S150\n'); run('15.0')
+cmd('sysbus WriteDoubleWord 0x%08X 1200' % FANLOSS)
+for k in range(23):
     run('10.0')
 mark('tuned'); send('M306\n'); run('0.1')
 mark('hold'); send('M104 S150\n'); run('40.0')
