@@ -21,6 +21,7 @@
 #include "spi.h"
 #include "sd.h"
 #include "display.h"
+#include "ui.h"
 #include "gcode_queue.h"
 #include "beeper.h"
 #include "endstops.h"
@@ -101,7 +102,7 @@ static void init(void) {
 
   #ifdef DISPLAY
     display_init();
-    display_greeting();
+    ui_init();
   #endif
 
   // say hi to host
@@ -133,6 +134,11 @@ static void init(void) {
 
   // Print statistics (M78).
   job_init();
+
+  // I/O expander: fans, buttons.
+  #ifdef PCF8574_ADDRESS
+    expander_init();
+  #endif
 
   // Hotend and controller fans.
   #ifdef FANS
@@ -195,7 +201,13 @@ int main(void) {
     // If the movement queue is full, a move command would block. Wait.
     if (queue_full() == 0) {
 
-      if ( ! gcode_queue_execute()) {
+      // A command from the menu, else one from the host, else the SD card.
+      #ifdef DISPLAY
+        uint8_t menu_command = ui_execute();
+      #else
+        uint8_t menu_command = 0;
+      #endif
+      if ( ! menu_command && ! gcode_queue_execute()) {
         // Nothing from the host, continue with the SD card, if printing.
         #ifdef SD
           if (gcode_sources & GCODE_SOURCE_SD) {

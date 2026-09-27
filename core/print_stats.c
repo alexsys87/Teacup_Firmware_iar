@@ -99,6 +99,14 @@ uint8_t job_running(void) {
   return running;
 }
 
+uint8_t job_paused(void) {
+  return paused;
+}
+
+uint32_t job_elapsed_s(void) {
+  return elapsed_ms() / 1000;
+}
+
 void job_add_filament(uint32_t um) {
   if (running)
     filament_um += um;

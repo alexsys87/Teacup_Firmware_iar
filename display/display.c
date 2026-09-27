@@ -70,4 +70,79 @@ void display_writestr_P(const char *data_P) {
     display_writechar(r);
 }
 
+/// Wanted screen content and what was sent to the display already.
+static char screen[DISPLAY_LINES][DISPLAY_COLS + 1];
+static char shown[DISPLAY_LINES][DISPLAY_COLS];
+static uint8_t update_line;
+
+void display_text_clear(void) {
+  uint8_t l;
+
+  for (l = 0; l < DISPLAY_LINES; l++)
+    display_text_line(l, "");
+}
+
+void display_text(uint8_t line, uint8_t column, const char *text) {
+  if (line >= DISPLAY_LINES)
+    return;
+  while (*text && column < DISPLAY_COLS)
+    screen[line][column++] = *text++;
+}
+
+void display_text_line(uint8_t line, const char *text) {
+  uint8_t c;
+
+  if (line >= DISPLAY_LINES)
+    return;
+  for (c = 0; c < DISPLAY_COLS; c++)
+    screen[line][c] = *text ? *text++ : ' ';
+}
+
+const char *display_text_get(uint8_t line) {
+  screen[line][DISPLAY_COLS] = '\0';
+  return screen[line];
+}
+
+/**
+  Queue the changed part of one line, if the display queue has room for
+  it. Lines take turns, so a busy line doesn't starve the others.
+*/
+void display_update(void) {
+  uint8_t n, l, first, last, c;
+
+  for (n = 0; n < DISPLAY_LINES; n++) {
+    l = update_line;
+    update_line = (uint8_t)((update_line + 1) % DISPLAY_LINES);
+    for (first = 0; first < DISPLAY_COLS; first++)
+      if (screen[l][first] != shown[l][first])
+        break;
+    if (first == DISPLAY_COLS)
+      continue;
+    for (last = DISPLAY_COLS - 1; last > first; last--)
+      if (screen[l][last] != shown[l][last])
+        break;
+    // Cursor command (3 bytes) plus the characters.
+    if (((displaytail - displayhead - 1) & (DISPLAY_BUFFER_SIZE - 1)) <
+        (unsigned)(last - first + 4))
+      return;
+    display_set_cursor(l, first);
+    for (c = first; c <= last; c++) {
+      uint8_t ch = (uint8_t)screen[l][c];
+
+      display_writechar(ch >= 0x20 && ch < 0x7F ? ch : '?');
+      shown[l][c] = screen[l][c];
+    }
+    return;
+  }
+}
+
+/// After a display clear: the display shows spaces, the screen too.
+void display_text_reset(void) {
+  uint8_t l, c;
+
+  for (l = 0; l < DISPLAY_LINES; l++)
+    for (c = 0; c < DISPLAY_COLS; c++)
+      screen[l][c] = shown[l][c] = ' ';
+}
+
 #endif /* DISPLAY */

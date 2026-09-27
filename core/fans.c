@@ -26,33 +26,6 @@
 #include "clock.h"
 #include "dda_queue.h"
 
-#ifdef PCF8574_ADDRESS
-
-#include "i2c.h"
-
-/// Output byte: unused outputs stay high (inputs for buttons, encoder).
-static uint8_t exp_out = 0xFF;
-static uint8_t exp_dirty = 1;
-
-void expander_set(uint8_t bit, uint8_t on) {
-  uint8_t v = on ? (uint8_t)(exp_out | (1U << bit))
-                 : (uint8_t)(exp_out & ~(1U << bit));
-
-  if (v != exp_out) {
-    exp_out = v;
-    exp_dirty = 1;
-  }
-}
-
-void expander_tick(void) {
-  // Wait while another device (display) has a transmission open.
-  if ( ! exp_dirty || i2c_tx_open())
-    return;
-  i2c_write_to((uint8_t)(PCF8574_ADDRESS << 1), exp_out, 1);
-  exp_dirty = 0;
-}
-
-#endif /* PCF8574_ADDRESS */
 
 #ifdef FANS
 
@@ -93,9 +66,6 @@ static void set_controller_fan(uint8_t on) {
 }
 
 void fans_init(void) {
-  #ifdef PCF8574_ADDRESS
-    i2c_init(0);
-  #endif
   #ifdef HOTEND_FAN_PIN
     SET_OUTPUT(HOTEND_FAN_PIN);
   #endif

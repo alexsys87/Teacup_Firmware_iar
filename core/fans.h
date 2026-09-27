@@ -14,12 +14,7 @@
   #define FANS
 #endif
 
-#ifdef PCF8574_ADDRESS
-/// Set an output of the PCF8574 (sent within 10 ms).
-void expander_set(uint8_t bit, uint8_t on);
-/// Send pending expander changes, every 10 ms.
-void expander_tick(void);
-#endif
+#include "expander.h"
 
 #ifdef FANS
 void fans_init(void);

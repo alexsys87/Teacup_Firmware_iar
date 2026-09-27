@@ -1,12 +1,17 @@
 /** \file
-  \brief I2C master for STM32F4 (I2C v1 peripheral), transmit only.
+  \brief I2C master for STM32F4 (I2C v1 peripheral).
 
   Sequence per transmission (RM0368 master transmitter):
     START -> SB -> address -> ADDR -> data ... -> last data -> BTF -> STOP.
-  The queue stores 10 bit entries: bit 8 marks the last byte of a
+  The queue stores 11 bit entries: bit 8 marks the last byte of a
   transmission, bit 9 an address entry, which starts each transmission.
   So devices with different addresses (display, I/O expander) can share
   the bus and the queue.
+
+  Bit 10 on an address entry makes it a read of one byte, a transmission
+  of its own (RM0368 master receiver, single byte): START -> SB ->
+  address + R -> ADDR (ACK is off already, clear ADDR, set STOP) ->
+  RXNE -> data.
 */
 
 #include "i2c.h"
@@ -71,7 +76,8 @@ enum {
   I2C_IDLE = 0,       ///< No transmission.
   I2C_ACTIVE,         ///< Transmission ongoing, sending data.
   I2C_WAIT_DATA,      ///< Transmission open, queue ran empty (clock stretched).
-  I2C_ENDING          ///< Last byte written, waiting for BTF to send STOP.
+  I2C_ENDING,         ///< Last byte written, waiting for BTF to send STOP.
+  I2C_READING         ///< Read of one byte, waiting for ADDR, then RXNE.
 };
 
 static volatile uint16_t i2c_buf[I2C_BUFSIZE];
@@ -80,6 +86,8 @@ static volatile uint8_t i2c_state;
 static uint8_t i2c_address;         ///< Default address (i2c_write()).
 static uint8_t i2c_inited;
 static uint8_t w_open;              ///< Writer: transmission started, not ended.
+static volatile uint8_t rd_state;   ///< I2C_READ_... of the one read.
+static volatile uint8_t rd_value;
 
 #define I2C_IRQS  (I2C_CR2_ITEVTEN | I2C_CR2_ITBUFEN | I2C_CR2_ITERREN)
 
@@ -180,19 +188,8 @@ static void i2c_push(uint16_t entry) {
   i2c_head = next;
 }
 
-void i2c_write(uint8_t data, uint8_t last_byte) {
-  i2c_write_to(i2c_address, data, last_byte);
-}
-
-void i2c_write_to(uint8_t address, uint8_t data, uint8_t last_byte) {
-  if ( ! w_open) {
-    i2c_push(0x200 | address);
-    w_open = 1;
-  }
-  i2c_push(data | (last_byte ? 0x100 : 0));
-  if (last_byte)
-    w_open = 0;
-
+/// Start a transmission if the bus is idle, or continue a stretched one.
+static void i2c_kick(void) {
   ATOMIC_START_NOSTEP();
     uint8_t state = i2c_state;
 
@@ -206,14 +203,73 @@ void i2c_write_to(uint8_t address, uint8_t data, uint8_t last_byte) {
   ATOMIC_END_NOSTEP();
 }
 
+uint8_t i2c_read_from(uint8_t address) {
+  if (w_open || rd_state == I2C_READ_PENDING)
+    return 0;
+  rd_state = I2C_READ_PENDING;
+  i2c_push(0x600 | address);
+  i2c_kick();
+  return 1;
+}
+
+uint8_t i2c_read_result(uint8_t *value) {
+  uint8_t r = rd_state;
+
+  if (r == I2C_READ_DONE || r == I2C_READ_FAILED) {
+    *value = rd_value;
+    rd_state = I2C_READ_NONE;
+  }
+  return r;
+}
+
+void i2c_write(uint8_t data, uint8_t last_byte) {
+  i2c_write_to(i2c_address, data, last_byte);
+}
+
+void i2c_write_to(uint8_t address, uint8_t data, uint8_t last_byte) {
+  if ( ! w_open) {
+    i2c_push(0x200 | address);
+    w_open = 1;
+  }
+  i2c_push(data | (last_byte ? 0x100 : 0));
+  if (last_byte)
+    w_open = 0;
+  i2c_kick();
+}
+
 void I2C_EV_HANDLER(void) {
   uint32_t sr1 = I2Cx->SR1;
 
   if (sr1 & I2C_SR1_SB) {                       // EV5: START sent.
     uint16_t a = i2c_queue_empty() ? 0 : i2c_queue_pop();
 
+    if (a & 0x400) {                            // A read.
+      i2c_state = I2C_READING;
+      I2Cx->DR = (uint8_t)a | 1;
+      return;
+    }
     // Every transmission starts with its address entry.
     I2Cx->DR = (a & 0x200) ? (uint8_t)a : i2c_address;
+    return;
+  }
+
+  if (i2c_state == I2C_READING) {
+    if (sr1 & I2C_SR1_ADDR) {                   // EV6, one byte to receive:
+      // ACK is off; clear ADDR and set STOP right after, without an
+      // interrupt in between (RM0368, single byte reception).
+      ATOMIC_START();
+        (void)I2Cx->SR2;
+        I2Cx->CR1 |= I2C_CR1_STOP;
+      ATOMIC_END();
+    }
+    else if (sr1 & I2C_SR1_RXNE) {              // EV7: the byte.
+      rd_value = (uint8_t)I2Cx->DR;
+      rd_state = I2C_READ_DONE;
+      I2Cx->CR2 &= ~I2C_IRQS;
+      i2c_state = I2C_IDLE;
+      if ( ! i2c_queue_empty())
+        i2c_start();
+    }
     return;
   }
 
@@ -261,7 +317,11 @@ void I2C_ER_HANDLER(void) {
   I2Cx->CR1 |= I2C_CR1_STOP;
   I2Cx->CR2 &= ~I2C_IRQS;
 
-  if (i2c_state != I2C_ENDING) {
+  if (i2c_state == I2C_READING) {
+    rd_value = 0xFF;                            // A read has no data entries.
+    rd_state = I2C_READ_FAILED;
+  }
+  else if (i2c_state != I2C_ENDING) {
     while ( ! i2c_queue_empty()) {
       if (i2c_queue_pop() & 0x100)
         break;

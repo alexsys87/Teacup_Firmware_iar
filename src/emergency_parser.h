@@ -24,6 +24,9 @@ void emergency_parser_char(uint8_t port, uint8_t c);
 /// Finish a quickstop in main loop context. Called from clock_poll().
 void emergency_poll(void);
 
+/// Quickstop like M410 (menu "Stop print"), finished by emergency_poll().
+void emergency_quickstop(void);
+
 /// Counts finished quickstops (wraps). Long operations compare it before
 /// and after waiting to notice an M410 in between.
 uint8_t emergency_quickstop_count(void);

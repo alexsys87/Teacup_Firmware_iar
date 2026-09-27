@@ -64,6 +64,10 @@ static void quickstop_isr(void) {
   quickstop_pending = 1;
 }
 
+void emergency_quickstop(void) {
+  quickstop_isr();
+}
+
 static void ep_execute(uint16_t cmd) {
   switch (cmd) {
     case 112:
