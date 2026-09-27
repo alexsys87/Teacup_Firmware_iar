@@ -66,7 +66,7 @@ run('0.02')
 for i in range(32):
     cmd('sysbus WriteWord 0x%08X 3911' % (ADCBUF + 2 * i))       # 25 C
 run('0.4')
-send('M80\nG92 X100 Y100 Z5 E0\nM83\n'); run('0.8')
+send('M80\nG92 X100 Y100 Z5 E0\nM83\nM205 J0 B0\n'); run('0.8')    # classic jerk: the polygon runs at F
 cmd('sysbus.cpu AddHook 0x%08X "self.ErrorLog(\'LA %%.9f %%d %%d\' %% '
     '(machine.LocalTimeSource.ElapsedVirtualTime.TotalSeconds, '
     'machine.SystemBus.ReadDoubleWord(0x%08X), '
