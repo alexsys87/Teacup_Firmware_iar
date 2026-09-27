@@ -62,7 +62,11 @@ cmd('sysbus WriteDoubleWord 0x%08X 600' % FANLOSS)
 for k in range(23):
     run('10.0')
 mark('tuned'); send('M306\n'); run('0.1')
-mark('hold'); send('M104 S150\n'); run('40.0')
+# The hotend cooled down after the autotune; full power needs ~55 s from
+# 47 C to 150 C with this plant, then settle.
+mark('hold'); send('M104 S150\n')
+for k in range(9):
+    run('10.0')
 for k in range(10):
     mark('hold_%d' % k); send('M105\n'); run('1.0')
 mark('fan'); send('M106 S255\n')
