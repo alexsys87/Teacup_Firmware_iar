@@ -111,8 +111,11 @@ cmd('quit')
 
 script = '/tmp/teacup_laser_%s_%d.resc' % (KIND, os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.run([RENODE, '--console', '--disable-gui', script], capture_output=True, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout + proc.stderr)
+# stdin stays open: at EOF on stdin Renode's console queues input events
+# without end and runs out of memory.
+proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
 open('/tmp/teacup_laser_%s.log' % KIND, 'w').write(out)
 os.remove(script)
 
