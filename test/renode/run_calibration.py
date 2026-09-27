@@ -112,13 +112,13 @@ mark('g26_after'); send('M114\nM420\n'); run('0.3')
 # 4. M9910: 3 lines.
 # G26 switched the heaters off at the end (no K).
 send('G92 X100 Y100 Z5 E0\nM900 K0.05\nM104 S200\n'); run('0.5')
-mark('la'); send('M9910 A0 B0.02 C0.01\n'); run('12.0')
+mark('la'); send('M9910 A0 B0.02 C0.01\n'); run('25.0')    # prime 3 s + 3 lines of ~4 s
 mark('la_after'); send('M114\nM900\n'); run('0.3')
 
 # 5. M9911: two layers.
 send('G92 X100 Y100 Z5 E0\nM593 F33\n'); run('0.2')
 cmd('sysbus LogPeripheralAccess sysbus.timer3 false')
-mark('is'); send('M9911 A20 B40 H0.4\n'); run('18.0')
+mark('is'); send('M9911 A20 B40 H0.4\n'); run('30.0')     # first layer 200 mm at 20 mm/s
 mark('is_after'); send('M114\nM593\n'); run('0.3')
 
 # 6. M9912 tuning tower.
