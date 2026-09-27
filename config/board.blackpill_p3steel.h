@@ -128,6 +128,30 @@
 #define E_DIR_PIN                PB_5    // E0_DIR  (D28)
 #define E_INVERT_DIR                     // INVERT_E0_DIR true
 
+/** \def EXTRUDERS E1_STEP_PIN E1_DIR_PIN
+  Second extruder (T0 / T1, tool offset M218 T1 X Y Z), like Marlin with
+  EXTRUDERS 2. The E1 driver slot holds the Z2 driver in parallel to Z,
+  and all MCU pins are taken, so something has to go:
+
+   - Z2 back off the E1 slot: both Z motors on the Z driver (in parallel
+     or in series), or the Z2 driver fed from PB12 / PB13 by wires.
+   - E1_STEP on PC15, E1_DIR on PC14: remove the 32.768 kHz crystal. Not
+     together with Z_STEPPER_ALIGN (Z2_STEP), HOTEND_MAX31865 (CS),
+     SD_CARD_SELECT_PIN or the spindle ENA / DIR pins, which use the
+     same pins.
+   - Optional E1_ENABLE_PIN, otherwise STEPPER_ENABLE_PIN enables all.
+
+  Both extruders use the hotend heater and fan, the E steps per mm (M92 E)
+  and linear advance K. T1 steps by GPIO pulses (PC13..PC15 are slow
+  pins, fine for DRV8825 / TMC STEP inputs).
+*/
+//#define EXTRUDERS                2
+#if defined EXTRUDERS && EXTRUDERS == 2
+  #define E1_STEP_PIN            PC_15   // E1_STEP (D36), driver in the E1 slot
+  #define E1_DIR_PIN             PC_14   // E1_DIR  (D34)
+  //#define E1_INVERT_DIR
+#endif
+
 /** \def STEP_TIMER_PULSES
   STEP pulses of X (TIM1), Y (TIM2) and E (TIM3) by timers in one pulse
   mode. Startup reports "echo:Step pulses: X TIM1 Y TIM2 Z gpio E TIM3".
@@ -140,6 +164,43 @@
 */
 #define STEPPER_ENABLE_PIN       PB_14
 #define STEPPER_INVERT_ENABLE
+
+/** \def TMC_UART TMC_UART_TX_PIN TMC_X_ADDR TMC_RSENSE TMC_MICROSTEPS
+  TMC2209 (or TMC2208) drivers configured over UART instead of DRV8825,
+  like Marlin: run current M906, stealthChop / spreadCycle M569, status
+  M122, stored with M500. Drivers are configured again after they lost
+  power (motor supply off / on).
+
+  Single wire: TMC_UART_TX_PIN goes through 1 k to PDN_UART of all drivers
+  (on RAMPS: the pins next to the drivers, jumpers under the driver
+  removed where needed). TMC2209: address of each driver by MS1 / MS2
+  (X 0, Y 1, Z 2, E 3). TMC2208 has address 0 only: one driver on the
+  wire, set only its TMC_*_ADDR.
+
+  The only free USART is USART2 on PA2, the host UART: TMC_UART 2 switches
+  it off (NO_SERIAL_UART), the host is connected by USB then. Without
+  TMC_UART the drivers are set by their pins and potentiometers as before.
+
+  TMC_MICROSTEPS 32 keeps the steps per mm of the printer config (1/32 of
+  the DRV8825). TMC_RSENSE: sense resistors of the driver modules, ohm
+  (BTT / FYSETC TMC2209: 0.11).
+*/
+//#define TMC_UART                 2
+#ifdef TMC_UART
+  #ifndef TMC_UART_TX_PIN
+    #define TMC_UART_TX_PIN        PA_2
+  #endif
+  #if TMC_UART == 2
+    #define NO_SERIAL_UART
+  #endif
+  #define TMC_X_ADDR               0
+  #define TMC_Y_ADDR               1
+  #define TMC_Z_ADDR               2
+  #define TMC_E_ADDR               3
+  #define TMC_RSENSE               0.11
+  #define TMC_MICROSTEPS           32
+  #define TMC_HOLD_MULTIPLIER      0.5
+#endif
 
 /** \def MIN_STEP_PULSE_US
   DRV8825 needs 1.9 us.
@@ -418,14 +479,43 @@ DEFINE_TEMP_SENSOR(bed,      TT_THERMISTOR, PB_1,  THERMISTOR_epcos100k)  // T1 
   in 10 ms steps, 4 switching events per second at most. For bang-bang
   (BANG_BANG_BED in the printer config) this acts like on/off. Fan: 500 Hz.
 */
+/** \def SPINDLE_LASER LASER_MODE SPINDLE_LASER_PWM_PIN SPINDLE_LASER_PWM_FREQ SPEED_POWER_MAX
+  Spindle or laser, M3 / M4 / M5 like Marlin. All pins are taken: the PWM
+  goes to PB9 instead of the part fan (the fan heater is left out then,
+  M106 does nothing). A laser module or a spindle controller takes the
+  3.3 V PWM signal of PB9 directly (not the fan MOSFET output of the
+  printer board; or use that at a low frequency for a laser with a
+  5..24 V TTL input). SPEED_POWER_MAX: S of full power (255, 100 or the
+  RPM of the spindle at full PWM).
+
+  LASER_MODE: laser, the power travels with the moves (G1 / G2 / G3 with
+  power, G0 without, M4 dynamic power by speed). Without it: spindle, M3
+  / M4 / M5 switch after the queued moves, SPINDLE_POWERUP_DELAY ms dwell.
+
+  Enable and direction pins are optional and need freed pins (PC14
+  without SD card, PC15 without G34 / MAX31865).
+*/
+//#define SPINDLE_LASER
+//#define LASER_MODE
+#define SPINDLE_LASER_PWM_PIN    PB_9_TIM11
+#define SPINDLE_LASER_PWM_FREQ   1000
+#define SPEED_POWER_MAX          255
+//#define SPINDLE_LASER_ENA_PIN    PC_14
+//#define SPINDLE_DIR_PIN          PC_15
+//#define SPINDLE_POWERUP_DELAY    3000
+
 //            name      pin         invert  pwm      max_pwm
 DEFINE_HEATER(extruder, PB_8_TIM10, 0,      100,     100)   // TIM10_CH1
 DEFINE_HEATER(bed,      PB_0_GPIO,  0,      2,       100)   // slow soft PWM
+#ifndef SPINDLE_LASER
 DEFINE_HEATER(fan,      PB_9_TIM11, 0,      500,     100)   // TIM11_CH1
+#endif
 
 #define HEATER_EXTRUDER HEATER_extruder
 #define HEATER_BED      HEATER_bed
-#define HEATER_FAN      HEATER_fan
+#ifndef SPINDLE_LASER
+  #define HEATER_FAN    HEATER_fan
+#endif
 
 /***************************************************************************\
 * 5. COMMUNICATION OPTIONS                                                  *
@@ -457,3 +547,16 @@ DEFINE_HEATER(fan,      PB_9_TIM11, 0,      500,     100)   // TIM11_CH1
   ADC samples averaged per reading (min and max are discarded).
 */
 #define OVERSAMPLE               16
+
+/*
+  Pin conflicts of the second extruder (EXTRUDERS above).
+*/
+#if defined EXTRUDERS && EXTRUDERS == 2
+  #if defined Z_STEPPER_ALIGN || defined HOTEND_MAX31865
+    #error EXTRUDERS 2 uses PC15: disable Z_STEPPER_ALIGN and HOTEND_MAX31865.
+  #endif
+  #if defined SD_CARD_SELECT_PIN || defined SPINDLE_LASER_ENA_PIN || \
+      defined SPINDLE_DIR_PIN
+    #error EXTRUDERS 2 uses PC14 / PC15: no SD card CS or spindle ENA / DIR there.
+  #endif
+#endif

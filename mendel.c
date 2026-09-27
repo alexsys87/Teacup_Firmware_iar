@@ -33,6 +33,8 @@
 #include "power_loss.h"
 #include "fans.h"
 #include "print_stats.h"
+#include "spindle.h"
+#include "tmc.h"
 
 #ifdef CANNED_CYCLE
   static const char canned_gcode_P[] = CANNED_CYCLE;
@@ -77,6 +79,13 @@ static void init(void) {
   endstops_init();
 
   heater_init();
+
+  #ifdef SPINDLE_LASER
+    spindle_init();
+  #endif
+
+  // TMC drivers: UART, configured before the first move.
+  tmc_init();
 
   // set up dda
   dda_init();

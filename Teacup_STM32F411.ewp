@@ -2344,6 +2344,12 @@
         <file>
             <name>$PROJ_DIR$\core\buttons.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\spindle.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\core\tmc.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>
@@ -2400,6 +2406,9 @@
         </file>
         <file>
             <name>$PROJ_DIR$\hal\usb_cdc.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\hal\tmc_uart.c</name>
         </file>
         <file>
             <name>$PROJ_DIR$\hal\spi.c</name>

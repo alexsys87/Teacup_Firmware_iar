@@ -3,6 +3,7 @@
 */
 
 #include "dda_queue.h"
+#include "spindle.h"
 #include "gcode_parse.h"
 
 #include <string.h>
@@ -99,6 +100,9 @@ TEACUP_STEP_RAMFUNC void queue_step(void) {
     }
     else {
       mb_tail_dda = NULL;
+      #ifdef SPINDLE_LASER
+        spindle_apply(0);           // Laser mode: off after the last move.
+      #endif
     }
   }
 }

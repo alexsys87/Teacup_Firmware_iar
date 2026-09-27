@@ -232,6 +232,15 @@ static void home_axis(enum axis_e n, int8_t dir, enum axis_endstop_e endstop_che
 }
 
 int32_t home_offset[3];
+int32_t tool_shift[3];
+
+/// Same physical position, coordinates shifted by delta (like G92).
+static void shift_coordinates(enum axis_e n, int32_t delta) {
+  startpoint.axis[n] += delta;
+  if ( ! next_target.option_all_relative)
+    next_target.target.axis[n] += delta;
+  dda_new_startpoint();
+}
 
 void home_set_offset(enum axis_e n, int32_t offset_um) {
   int32_t delta;
@@ -242,12 +251,19 @@ void home_set_offset(enum axis_e n, int32_t offset_um) {
   queue_wait();
   delta = offset_um - home_offset[n];
   home_offset[n] = offset_um;
+  shift_coordinates(n, delta);
+}
 
-  // Same physical position, new coordinates (like G92).
-  startpoint.axis[n] += delta;
-  if ( ! next_target.option_all_relative)
-    next_target.target.axis[n] += delta;
-  dda_new_startpoint();
+void home_set_tool_shift(enum axis_e n, int32_t offset_um) {
+  int32_t delta;
+
+  if (n > Z)
+    return;
+
+  queue_wait();
+  delta = offset_um - tool_shift[n];
+  tool_shift[n] = offset_um;
+  shift_coordinates(n, delta);
 }
 
 static void set_axis_home_position(enum axis_e n, int8_t dir) {
@@ -286,6 +302,6 @@ static void set_axis_home_position(enum axis_e n, int8_t dir) {
       #endif
     }
   }
-  home_position += home_offset[n];
+  home_position += home_offset[n] + tool_shift[n];
   startpoint.axis[n] = next_target.target.axis[n] = home_position;
 }

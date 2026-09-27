@@ -22,6 +22,21 @@ extern int32_t home_offset[3];
 */
 void home_set_offset(enum axis_e n, int32_t offset_um);
 
+/**
+  Offset of the active tool (M218, 0 for T0), micrometers, X/Y/Z: the
+  nozzle of T1 sits this far from the nozzle of T0. Coordinates are
+  those of the active nozzle, the home position and the soft limits move
+  along.
+*/
+extern int32_t tool_shift[3];
+
+/**
+  Set the offset of the active tool (T0 / T1, M218). The current position
+  is shifted, the next move puts the new nozzle at the programmed place.
+  Waits for the queue to empty.
+*/
+void home_set_tool_shift(enum axis_e n, int32_t offset_um);
+
 enum axis_endstop_e {
   X_MIN_ENDSTOP = 0x01,
   X_MAX_ENDSTOP = 0x02,

@@ -81,8 +81,10 @@ TEACUP_STEP_RAMFUNC static int32_t advance_now(uint32_t now) {
 TEACUP_HOT
 TEACUP_STEP_RAMFUNC static void e_pulse(void) {
   #ifdef STEP_TIMER_PULSES
-    if (step_timer[3]) {
-      STEP_TRIGGER(step_timer[3]);
+    TIM_TypeDef *tim = step_timer_e();
+
+    if (tim) {
+      STEP_TRIGGER(tim);
       return;
     }
   #endif

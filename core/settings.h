@@ -25,6 +25,9 @@ typedef struct {
   int32_t       skew_xy;        ///< M852 I, XY skew factor, millionths.
   uint32_t      backlash_z;     ///< M425 Z, Z backlash, um.
   uint32_t      backlash_f;     ///< M425 F, fraction corrected, 1/1000.
+  uint32_t      backlash_x;     ///< M425 X, X backlash, um.
+  uint32_t      backlash_y;     ///< M425 Y, Y backlash, um.
+  uint32_t      backlash_s;     ///< M425 S, smoothing distance, um.
   uint32_t      retract_length; ///< M207 S, firmware retract, um.
   uint32_t      retract_feedrate; ///< M207 F, mm/min.
   int32_t       retract_zlift;  ///< M207 Z, um.
@@ -33,6 +36,9 @@ typedef struct {
   uint32_t      host_timeout;   ///< M86 S, host lost after s, 0 = off.
   uint32_t      host_lost_temp; ///< M86 E, hotend then, C.
   uint32_t      plr_enabled;    ///< M413 S, power loss recovery on.
+  int32_t       tool_offset[3]; ///< M218 T1 X Y Z, offset of tool 1, um.
+  uint32_t      tmc_current[4]; ///< M906 X Y Z E, run current, mA.
+  uint32_t      tmc_stealth;    ///< M569 S, stealthChop per axis, bits X..E.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.
