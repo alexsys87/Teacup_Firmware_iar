@@ -15,7 +15,7 @@
 void kinematics_update(void);
 
 #ifdef SKEW_CORRECTION
-  extern float skew_xy_factor;
+  extern float skew_xy_factor, skew_xz_factor, skew_yz_factor;
 #endif
 
 void carthesian_to_carthesian(const TARGET *startpoint, const TARGET *target,

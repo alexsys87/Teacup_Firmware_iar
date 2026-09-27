@@ -169,6 +169,9 @@ typedef struct {
   float             max_entry_vsq; ///< crossF^2, entry speed limit
   float             entry_vsq;     ///< planned entry speed^2 (= start_steps)
   float             plan_vsq;      ///< scratch value of the reverse pass
+  // Junction deviation (M205 J), see dda_find_crossing_speed().
+  float             unit[3];       ///< direction of X, Y, Z, unit vector
+  float             accel;         ///< acceleration along the path, mm/s^2
   #endif
   // Number the moves to be able to test at the end of lookahead if the moves
   // are the same. Note: we do not need a lot of granularity here: more than
@@ -242,6 +245,9 @@ void dda_start(DDA *dda);
 /// Uses dda->c0.
 uint32_t dda_c_for_n(const DDA *dda, uint32_t n);
 #endif
+
+/// Moves queued now may be slowed down (M205 B): G0 / G1 from the host.
+extern uint8_t dda_slowdown;
 
 // DDA takes one step (called from timer interrupt)
 void dda_step(DDA *dda);

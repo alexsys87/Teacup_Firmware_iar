@@ -128,6 +128,34 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define MAX_JERK_Z               24       // 0.4 mm/s
 #define MAX_JERK_E               300      // 5 mm/s
 
+/** \def JUNCTION_DEVIATION
+  Junction deviation (M205 J, Marlin JUNCTION_DEVIATION_MM), mm: corner
+  speed from the angle and the acceleration, the same in every direction;
+  curves of short segments at most with the centripetal acceleration a
+  (v = sqrt(a * r)). MAX_JERK_X/Y/Z then apply only to moves without X, Y
+  and Z motion (retracts), MAX_JERK_E always. 0 = classic jerk. 0.02 mm at
+  1000 mm/s^2: 90 degree corner 7 mm/s, 45 degrees 16 mm/s; with input
+  shaping more is fine (0.05: 11 and 25 mm/s).
+*/
+#define JUNCTION_DEVIATION       0.02
+
+/** \def MIN_SEGMENT_TIME SLOWDOWN_MOVES
+  Slowdown (M205 B, Marlin SLOWDOWN / DEFAULT_MINSEGMENTTIME), us: while
+  fewer than SLOWDOWN_MOVES moves are queued (default a quarter of the
+  queue), short moves get longer, so a slow host doesn't let the queue run
+  dry (stop + blob). 0 = off.
+*/
+#define MIN_SEGMENT_TIME         20000
+
+/** \def FILAMENT_DIAMETER VOLUMETRIC_SPEED_LIMIT
+  Filament diameter for volumetric extrusion (M200 D S) and the
+  volumetric speed limit (M200 L), mm^3/s: printing moves get slower
+  where the hotend couldn't melt enough. E3D V6 / Prusa V6 about 11..15,
+  Volcano about 25. 0 = off.
+*/
+#define FILAMENT_DIAMETER        1.75
+#define VOLUMETRIC_SPEED_LIMIT   0.0
+
 /** \def LINEAR_ADVANCE LINEAR_ADVANCE_K
   Linear advance (M900 K, Marlin units): the extruder runs ahead of the
   nominal position by K * extrusion speed, K in seconds (mm of filament per
@@ -239,6 +267,12 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define GRID_POINTS_X            3
 #define GRID_POINTS_Y            3
 #define MESH_INSET               15.0
+/** \def MESH_SUBDIVISIONS
+  Mesh subdivision (Marlin ABL_BILINEAR_SUBDIVISION): points per grid cell
+  of a finer virtual grid from a Catmull-Rom spline through the measured
+  points, so Z follows a smooth surface. 1 = plain bilinear mesh, max. 5.
+*/
+#define MESH_SUBDIVISIONS        3
 #define LEVELING_FADE_HEIGHT     10.0
 
 /** \def Z_PROBE_OFFSET_X Z_PROBE_OFFSET_Y Z_PROBE_OFFSET_Z
@@ -522,6 +556,23 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
   difference is F. 0 = off.
 */
 #define DEFAULT_PID_FAN_FF       0
+
+/** \def HOTEND_MPC MPC_HEATER_POWER MPC_BLOCK_HEAT_CAPACITY MPC_SENSOR_RESPONSIVENESS MPC_AMBIENT_XFER_COEFF MPC_AMBIENT_XFER_COEFF_FAN255 MPC_FILAMENT_HEAT_CAPACITY_PERMM
+  Model predictive temperature control of the hotend (M306, Marlin
+  MPCTEMP) instead of the PID: a model of heater block and sensor gives
+  the power, with feed-forward for the part fan and the extrusion, so the
+  temperature stays put when the fan starts or the flow changes. Setup:
+  M306 P<heater W> (40 W cartridge), M306 T (measures the rest, about 5
+  minutes, hotend free of filament drips), M500. The values below are
+  Marlin's defaults (E3D V6, 40 W).
+*/
+//#define HOTEND_MPC
+#define MPC_HEATER_POWER                  40.0     // W
+#define MPC_BLOCK_HEAT_CAPACITY           16.7     // J/K
+#define MPC_SENSOR_RESPONSIVENESS         0.22     // 1/s
+#define MPC_AMBIENT_XFER_COEFF            0.068    // W/K
+#define MPC_AMBIENT_XFER_COEFF_FAN255     0.097    // W/K
+#define MPC_FILAMENT_HEAT_CAPACITY_PERMM  0.0056   // J/K/mm, 1.75 mm PLA
 
 /** \def HOTEND_FAN_TEMP CONTROLLER_FAN_IDLE
   Hotend fan (Marlin's EXTRUDER_AUTO_FAN_TEMPERATURE): on at or above this

@@ -112,6 +112,10 @@ mark('g28_pos'); send('M114\n'); run('0.1'); report('g28')
 
 # ---- G30 at one point ----
 mark('g30'); send('G30 X50 Y50\n'); run('11.0'); report('g30')
+# ---- M423 X twist: G30 at the same point with the interpolated correction ----
+mark('tw_set'); send('M423 X0 Z0.1\nM423 X1 Z0.02\nM423 X2 Z-0.06\nM423\n'); run('0.2')
+mark('tw_g30'); send('G30 X50 Y50\n'); run('11.0'); report('tw_g30')
+mark('tw_off'); send('M423 R\n'); run('0.1')
 
 # ---- G29: 3x3 mesh ----
 mark('g29'); send('G29\n'); run('85.0'); report('g29')
@@ -274,6 +278,16 @@ for l in u:
     if mm: g30 = float(mm.group(3))
 exp30 = bed(50, 50) - ZREF
 check('G30 X50 Y50: bed height', near(g30, exp30, 0.008), (g30, round(exp30, 4), u))
+tw = [l.replace('echo:', '').strip() for l in uart('tw_set') if 'M423' in l]
+check('M423: points at X15 / 110 / 205 reported',
+      tw == ['M423 X0 Z0.100 ; at X15.000', 'M423 X1 Z0.020 ; at X110.000', 'M423 X2 Z-0.060 ; at X205.000'], tw)
+g30t = None
+for l in uart('tw_g30'):
+    mm = re.match(r'Bed X: ([\d.]+) Y: ([\d.]+) Z: (-?[\d.]+)', l)
+    if mm: g30t = float(mm.group(3))
+twist50 = 0.1 + (50 - 15) / 95.0 * (0.02 - 0.1)
+check('M423: G30 X50 corrected by %.4f' % twist50,
+      g30 is not None and g30t is not None and near(g30t - g30, twist50, 0.003), (g30t, g30))
 
 u = uart('g29')
 mesh = {}

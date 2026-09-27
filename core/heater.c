@@ -23,6 +23,7 @@
 */
 
 #include "heater.h"
+#include "mpc.h"
 
 #include <stdlib.h>
 #include "arch.h"
@@ -414,6 +415,10 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp,
 
   if (target_temp == 0) {
     pid_state[h].running = 0;
+    #if defined HOTEND_MPC && defined HEATER_EXTRUDER
+      if (h == HEATER_EXTRUDER)
+        mpc_reset();
+    #endif
     heater_set(h, 0);
     return;
   }
@@ -443,6 +448,12 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp,
     else if ((int32_t)current_temp <= (int32_t)target_temp - bb_hysteresis)
       pid_output = bb_on;
   }
+  #if defined HOTEND_MPC && defined HEATER_EXTRUDER
+  else if (h == HEATER_EXTRUDER) {
+    // Model predictive control instead of the PID (M306).
+    pid_output = mpc_run(temp_c, (float)target_temp * 0.25f);
+  }
+  #endif
   else {
     pid_output = pid_run(h, temp_c, (float)target_temp * 0.25f);
   }

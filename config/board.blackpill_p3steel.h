@@ -200,6 +200,11 @@
   #define TMC_RSENSE               0.11
   #define TMC_MICROSTEPS           32
   #define TMC_HOLD_MULTIPLIER      0.5
+  // Hybrid threshold (M913), mm/s: stealthChop below, spreadCycle above.
+  #define TMC_HYBRID_THRESHOLD_X   100
+  #define TMC_HYBRID_THRESHOLD_Y   100
+  #define TMC_HYBRID_THRESHOLD_Z   3
+  #define TMC_HYBRID_THRESHOLD_E   30
 #endif
 
 /** \def MIN_STEP_PULSE_US

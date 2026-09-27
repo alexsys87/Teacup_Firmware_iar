@@ -73,7 +73,7 @@ def adc(hotend, bed):
         cmd('sysbus WriteWord 0x%08X %d' % (ADCBUF + 2 * (i * SLOTS + 0), hotend))
         cmd('sysbus WriteWord 0x%08X %d' % (ADCBUF + 2 * (i * SLOTS + 1), bed))
 REGS = {'GCONF': 0x00, 'GSTAT': 0x01, 'IHOLD_IRUN': 0x10, 'TPOWERDOWN': 0x11,
-        'CHOPCONF': 0x6C, 'PWMCONF': 0x70}
+        'TPWMTHRS': 0x13, 'CHOPCONF': 0x6C, 'PWMCONF': 0x70}
 def regs(tag, addrs=(0, 1, 2, 3)):
     for a in addrs:
         for name, r in REGS.items():
@@ -102,6 +102,8 @@ regs('m906', (0,))
 mark('m569'); send('M569 S0 X\nM569\n'); run('0.2')
 regs('m569', (0,))
 cmd('sysbus.tmc SetDrvFlags 0 0x1')
+mark('m913'); send('M913 X50\nM913\n'); run('0.2')
+regs('m913', (0,))
 mark('m122'); send('M122\n'); run('0.3')
 cmd('sysbus.tmc SetDrvFlags 0 0x0')
 cmd('sysbus.tmc PowerCycle 1')
@@ -185,11 +187,19 @@ check('M906 X1000: IRUN without vsense, reported',
 check('M569 S0 X: spreadCycle on X, report',
       reg('m569', 0, 'GCONF') == GC | 4 and uart('m569')[-2:] == ['M569 S0 X E', 'M569 S1 Y Z'],
       (reg('m569', 0, 'GCONF'), uart('m569')))
+def thrs(mm_s, spm):                    # Marlin _tmc_thrs(), 1/32 microsteps
+    return int(12650000 * 32 / (256 * mm_s * spm))
+check('TPWMTHRS: hybrid X100 Y100 Z3 E30 mm/s',
+      [reg('on', a, 'TPWMTHRS') for a in range(4)] == [thrs(100, 160), thrs(100, 160), thrs(3, 8000), thrs(30, 1672)],
+      ([reg('on', a, 'TPWMTHRS') for a in range(4)], [thrs(100, 160), thrs(100, 160), thrs(3, 8000), thrs(30, 1672)]))
+check('M913 X50: TPWMTHRS, report', reg('m913', 0, 'TPWMTHRS') == thrs(50, 160) and
+      'M913 X50 Y100 Z3 E30' in uart('m913'), (reg('m913', 0, 'TPWMTHRS'), uart('m913')))
 m122 = uart('m122')
 check('M122: X TMC2209 ok 994 mA 1/32 spreadCycle, warning',
       any(l.startswith('TMC X (address 0): TMC2209, ok, 994 mA (IRUN 17, IHOLD 8), 1/32, spreadCycle') for l in m122) and
       any(l.startswith('CS_ACTUAL 17, standstill, overtemperature warning') for l in m122) and
-      sum(1 for l in m122 if ', ok, ' in l) == 4, m122)
+      sum(1 for l in m122 if ', ok, ' in l) == 4 and
+      any(l.startswith('TMC Y') and l.endswith('stealthChop up to 100 mm/s') for l in m122), m122)
 check('driver Y lost power: reset seen, configured again',
       reg('y_lost', 1, 'GCONF') == 1 and 'TMC Y reset, configured' in uart('y_reset') and
       reg('y_back', 1, 'IHOLD_IRUN') == ihold_irun(800) and reg('y_back', 1, 'GCONF') == GC,

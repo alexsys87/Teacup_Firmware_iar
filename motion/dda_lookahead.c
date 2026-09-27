@@ -32,6 +32,72 @@
 /// Maximum jerk per axis, settings.max_jerk (M205).
 #define maximum_jerk_P settings.max_jerk
 
+/**
+  Junction deviation (M205 J, like Marlin): the corner is taken as an arc
+  which deviates at most J from the corner point, with the centripetal
+  acceleration of the moves:
+
+    v^2 = a * J * sin(theta / 2) / (1 - sin(theta / 2))
+
+  theta is the angle between the moves (180 degrees = straight on), from
+  the unit vectors without trigonometry: cos(theta) = -(u1 . u2),
+  sin(theta / 2) = sqrt((1 - cos(theta)) / 2). The acceleration is the
+  lower one of both moves, limited by M201 of the axes in the direction of
+  the change (u2 - u1).
+
+  Short segments of curves (< 1 mm, turn below 45 degrees) additionally:
+  the speed of an arc through them, v^2 = a * length / turn angle, which is
+  the centripetal acceleration of the curve they approximate.
+
+  Speeds are along the path. \return the speed limit in mm/min.
+*/
+static float junction_speed(const DDA *prev, const DDA *current) {
+  float cos_theta, sin_d2, acc, vsq, j[3], len, limit;
+  enum axis_e i;
+
+  cos_theta = -(prev->unit[X] * current->unit[X] +
+                prev->unit[Y] * current->unit[Y] +
+                prev->unit[Z] * current->unit[Z]);
+  if (cos_theta > 0.999999f)
+    return 0.f;                               // Full reversal.
+  if (cos_theta < -0.999999f)
+    return 1e9f;                              // Straight on.
+
+  // Acceleration in the direction of the change, limited per axis.
+  acc = prev->accel < current->accel ? prev->accel : current->accel;
+  len = 0.f;
+  for (i = X; i <= Z; i++) {
+    j[i] = current->unit[i] - prev->unit[i];
+    len += j[i] * j[i];
+  }
+  len = sqrtf(len);
+  if (len > 0.f)
+    for (i = X; i <= Z; i++) {
+      float ji = fabsf(j[i]) / len;
+
+      if (ji > 0.f) {
+        limit = (float)settings.max_accel[i] / ji;
+        if (limit < acc)
+          acc = limit;
+      }
+    }
+
+  sin_d2 = sqrtf(0.5f * (1.f - cos_theta));
+  vsq = acc * ((float)settings.junction_dev * 0.001f) * sin_d2 /
+        (1.f - sin_d2);                       // (mm/s)^2
+
+  if (current->distance < 1000 && cos_theta < -0.7071068f) {
+    float turn = acosf(-cos_theta);           // Change of direction, rad.
+
+    if (turn > 0.f) {
+      limit = (float)current->distance * 0.001f * acc / turn;
+      if (limit < vsq)
+        vsq = limit;
+    }
+  }
+  return sqrtf(vsq) * 60.f;
+}
+
 
 /**
  * \brief Find maximum corner speed between two moves.
@@ -50,6 +116,7 @@ TEACUP_HOT
 void dda_find_crossing_speed(DDA *prev, DDA *current) {
   float F, dv, speed_factor, max_speed_factor, prevF, currF;
   enum axis_e i;
+  uint8_t jd_used;
 
   // Joining needs identical steps per mm on X and Y (M92 can change them).
   if (settings.steps_per_m[X] != settings.steps_per_m[Y]) {
@@ -103,7 +170,20 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
    */
   max_speed_factor = 2.f;
 
-  for (i = X; i < AXIS_COUNT; i++) {
+  // Junction deviation needs X, Y or Z motion in both moves, else (e.g.
+  // retract after a printing move) classic jerk for all axes.
+  jd_used = settings.junction_dev &&
+            (prev->delta[X] || prev->delta[Y] || prev->delta[Z]) &&
+            (current->delta[X] || current->delta[Y] || current->delta[Z]);
+  if (jd_used) {
+    float jd = junction_speed(prev, current);
+
+    if (jd < F)
+      max_speed_factor = jd / F;
+  }
+
+  // Classic jerk for all axes, or with junction deviation for E only.
+  for (i = jd_used ? E : X; i < AXIS_COUNT; i++) {
     prevF = (float)prev->delta[i] * F / (float)prev->total_steps;
     currF = (float)current->delta[i] * F / (float)current->total_steps;
     if (get_direction(prev, i) == get_direction(current, i))

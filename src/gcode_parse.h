@@ -80,6 +80,9 @@ typedef struct {
   int32_t           T_value;    ///< T word as a number (M204 travel acceleration,
                                 ///< G34 accuracy in um)
 
+  uint32_t          seen_mask;  ///< Bit per letter A..Z seen on this line.
+  float             fval[26];   ///< Value of each letter A..Z, plain float.
+
 	uint8_t						checksum_read;				///< checksum in gcode command
 	uint8_t						checksum_calculated;	///< checksum we calculated
 } GCODE_COMMAND;
@@ -97,6 +100,17 @@ extern uint8_t gcode_active;
 
 /// the command being processed
 extern GCODE_COMMAND next_target;
+
+/// Whether letter c ('A'..'Z') was seen on the current line.
+static inline uint8_t gcode_seen(char c) {
+  return (uint8_t)((next_target.seen_mask >> (c - 'A')) & 1U);
+}
+
+/// Value of letter c ('A'..'Z') on the current line as float, no unit
+/// conversion (inches aren't applied).
+static inline float gcode_float(char c) {
+  return next_target.fval[c - 'A'];
+}
 
 #ifdef SD
   /// For storing incoming strings. Currently the only use is SD card filename.

@@ -88,6 +88,13 @@ int8_t get_direction(DDA *dda, enum axis_e n) {
     return -1;
 }
 
+#ifndef SLOWDOWN_MOVES
+  #define SLOWDOWN_MOVES (MOVEBUFFER_SIZE / 4)
+#endif
+
+/// Set by G0 / G1 from the host while queueing: slowdown (M205 B) allowed.
+uint8_t dda_slowdown;
+
 #ifdef ACCELERATION_RAMPING
 /**
   Step interval at ramp position n, n steps from standstill on the fast axis.
@@ -182,6 +189,20 @@ void dda_init(void) {
 
   This is needed for example after homing or a G92. The new location must be in startpoint already.
 */
+/**
+  Volumetric extrusion (M200 D S1): E values in G-code are mm^3, here they
+  become um of filament. Without it E stays as it is.
+*/
+static int32_t e_volumetric(int32_t e) {
+  float dia, k;
+
+  if ( ! settings.vol_enabled || ! settings.filament_dia)
+    return e;
+  dia = (float)settings.filament_dia * 0.001f;
+  k = 1.f / (0.7853982f * dia * dia);
+  return (int32_t)((float)e * k + (e < 0 ? -0.5f : 0.5f));
+}
+
 void dda_new_startpoint(void) {
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA)) {
     int32_t z_offset = bed_level_offset(startpoint.axis);
@@ -190,7 +211,7 @@ void dda_new_startpoint(void) {
                startpoint.axis[Z], z_offset, startpoint.F);
   }
   axes_um_to_steps(startpoint.axis, startpoint_steps.axis);
-  startpoint_steps.axis[E] = um_to_steps(startpoint.axis[E], E);
+  startpoint_steps.axis[E] = um_to_steps(e_volumetric(startpoint.axis[E]), E);
 }
 
 /**
@@ -230,6 +251,7 @@ TEACUP_HOT
 void dda_create(DDA *dda, const TARGET *target) {
   axes_uint32_t delta_um;
   axes_int32_t steps;
+  int32_t e_target, e_start;
   uint32_t distance;
   float distance_f;
   #ifndef ACCELERATION_TEMPORAL
@@ -359,7 +381,11 @@ void dda_create(DDA *dda, const TARGET *target) {
 
   // Handle extruder axes. They act independently from the bots kinematics
   // type, but are subject to other special handling.
-  steps[E] = um_to_steps(target->axis[E], E);
+  // Volumetric extrusion (M200 D S1): E values are mm^3, converted to mm of
+  // filament here.
+  e_target = e_volumetric(target->axis[E]);
+  e_start = e_volumetric(startpoint.axis[E]);
+  steps[E] = um_to_steps(e_target, E);
 
   // Apply extrusion multiplier.
   if (target->e_multiplier != 256) {
@@ -371,7 +397,7 @@ void dda_create(DDA *dda, const TARGET *target) {
   if ( ! target->e_relative) {
     int32_t delta_steps;
 
-    delta_um[E] = (uint32_t)labs(target->axis[E] - startpoint.axis[E]);
+    delta_um[E] = (uint32_t)labs(e_target - e_start);
     delta_steps = steps[E] - startpoint_steps.axis[E];
     dda->delta[E] = (uint32_t)labs(delta_steps);
     startpoint_steps.axis[E] = steps[E];
@@ -388,7 +414,7 @@ void dda_create(DDA *dda, const TARGET *target) {
     */
     static int64_t e_rel_rem = (int64_t)UM_PER_METER * 256 / 2;
     const int64_t den = (int64_t)UM_PER_METER * 256;
-    int64_t num = (int64_t)target->axis[E] * steps_per_m_P[E] *
+    int64_t num = (int64_t)e_target * steps_per_m_P[E] *
                   target->e_multiplier + e_rel_rem;
     int64_t st = num / den;
 
@@ -399,7 +425,7 @@ void dda_create(DDA *dda, const TARGET *target) {
 
     // When we get more extruder axes:
     // for (i = E; i < AXIS_COUNT; i++) { ...
-    delta_um[E] = (uint32_t)labs(target->axis[E]);
+    delta_um[E] = (uint32_t)labs(e_target);
     dda->delta[E] = (uint32_t)labs(steps[E]);
     dda->e_direction = (target->axis[E] >= 0)?1:0;
   }
@@ -453,6 +479,55 @@ void dda_create(DDA *dda, const TARGET *target) {
     if (distance_f < 1.f)
       distance_f = (float)delta_um[E];
     distance = (uint32_t)(distance_f + 0.5f);
+    #ifdef LOOKAHEAD
+      // Direction for the junction deviation, the logical move (without
+      // backlash steps).
+      for (i = X; i <= Z; i++)
+        dda->unit[i] = (distance_f > 0.f) ?
+                       (float)get_direction(dda, i) * (float)delta_um[i] /
+                       distance_f : 0.f;
+    #endif
+
+    /**
+      Volumetric speed limit (M200 L, like Marlin's
+      VOLUMETRIC_EXTRUDER_LIMIT): printing moves (X, Y or Z with forward E)
+      get slower where they'd need more plastic per second than the hotend
+      can melt. mm^3/s = F / 60 * E per path mm * filament cross section.
+    */
+    if (settings.vol_limit && delta_um[E] && dda->e_direction &&
+        (delta_um[X] || delta_um[Y] || delta_um[Z]) && ! dda->endstop_check) {
+      float dia = (float)settings.filament_dia * 0.001f;
+      // Filament per path mm from the E steps, so M221 counts.
+      float e_um = (float)dda->delta[E] * 1000000.f /
+                   (float)settings.steps_per_m[E];
+      float mm3_per_mm = e_um / distance_f * (0.7853982f * dia * dia);
+      float f_max = (float)settings.vol_limit * 0.001f * 60.f / mm3_per_mm;
+
+      if ((float)dda->endpoint.F > f_max)
+        dda->endpoint.F = (uint32_t)f_max + 1U;
+    }
+
+    /**
+      Slowdown (M205 B, like Marlin's SLOWDOWN): while the queue holds less
+      than SLOWDOWN_MOVES moves, short moves take longer, the more the
+      emptier the queue is: t += 2 * (B - t) / queued. The queue then fills
+      up again instead of running dry, which would stop the printer and
+      leave a blob. Marlin uses half of its 16 moves, here a quarter of 64.
+    */
+    if (dda_slowdown && settings.min_segment_us && ! dda->endstop_check &&
+        distance_f > 0.f) {
+      uint_fast8_t queued = (MOVEBUFFER_SIZE - 1) - queue_free();
+
+      if (queued >= 2 && queued < SLOWDOWN_MOVES) {
+        float t_us = distance_f * 60000.f / (float)dda->endpoint.F;
+        float t_min = (float)settings.min_segment_us;
+
+        if (t_us < t_min) {
+          t_us += 2.f * (t_min - t_us) / (float)queued;
+          dda->endpoint.F = (uint32_t)(distance_f * 60000.f / t_us) + 1U;
+        }
+      }
+    }
 
     #ifdef BACKLASH_COMPENSATION
       // The backlash steps count for the speed and acceleration limits of
@@ -587,7 +662,11 @@ void dda_create(DDA *dda, const TARGET *target) {
                              (float)dda->total_steps;
           }
         #endif
-        acc_fast = move_acceleration(dda, delta_um, distance_f, la_kr) * ratio;
+        acc_fast = move_acceleration(dda, delta_um, distance_f, la_kr);
+        #ifdef LOOKAHEAD
+          dda->accel = acc_fast;
+        #endif
+        acc_fast *= ratio;
         spm = (float)settings.steps_per_m[dda->fast_axis];
         float ramp_div, ramp, fast_f;
 

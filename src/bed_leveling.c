@@ -9,8 +9,9 @@
   new mesh, fade height, homing, probing), the logical Z is recalculated
   from it instead (zcorr_sync_logical()), the motors never jump.
 
-  Mesh: bilinear interpolation between the grid points, constant beyond
-  the outer points (no extrapolation). Faded out linearly between Z = 0 and
+  Mesh: bilinear interpolation between the grid points, optionally of a
+  subdivided grid (MESH_SUBDIVISIONS, Catmull-Rom), constant beyond the
+  outer points (no extrapolation). Faded out linearly between Z = 0 and
   the fade height, above that the nozzle follows the logical Z exactly.
   Moves are split where they cross a grid line, so Z follows the surface
   between the points, too.
@@ -41,26 +42,105 @@ mesh_t mesh;
 #if defined BED_LEVELING || defined BABYSTEPPING || defined FIRMWARE_RETRACT
 
 #ifdef BED_LEVELING
-/// Bilinear mesh height at X, Y (um), constant beyond the outer points.
+/**
+  Mesh subdivision (MESH_SUBDIVISIONS, like Marlin's
+  ABL_BILINEAR_SUBDIVISION): a finer virtual grid, MESH_SUBDIVISIONS points
+  per cell, from a Catmull-Rom spline through the measured points (beyond
+  the outer points extrapolated linearly for the spline). Z then follows a
+  smooth surface instead of kinks at the grid lines. Between the virtual
+  points bilinear, moves are split at the virtual grid lines. 1 = plain
+  bilinear mesh.
+*/
+#define VGRID ((7 - 1) * MESH_SUBDIVISIONS + 1)
+
+static int16_t vz[VGRID][VGRID];        ///< Virtual grid, um, [y][x].
+static uint8_t vnx, vny;                ///< Virtual points, 0 = no mesh.
+static float vdx, vdy;                  ///< Virtual spacing, um.
+
+/// Measured point, extrapolated linearly one point beyond the mesh.
+static float mesh_point(int i, int j) {
+  if (i < 0)
+    return 2.f * mesh_point(0, j) - mesh_point(1, j);
+  if (i >= mesh.nx)
+    return 2.f * mesh_point(mesh.nx - 1, j) - mesh_point(mesh.nx - 2, j);
+  if (j < 0)
+    return 2.f * mesh_point(i, 0) - mesh_point(i, 1);
+  if (j >= mesh.ny)
+    return 2.f * mesh_point(i, mesh.ny - 1) - mesh_point(i, mesh.ny - 2);
+  return (float)mesh.z[j][i];
+}
+
+/// Catmull-Rom spline between p1 (t = 0) and p2 (t = 1).
+static float catmull_rom(float p0, float p1, float p2, float p3, float t) {
+  return 0.5f * (2.f * p1 + (p2 - p0) * t +
+                 (2.f * p0 - 5.f * p1 + 4.f * p2 - p3) * t * t +
+                 (3.f * (p1 - p2) + p3 - p0) * t * t * t);
+}
+
+/// Compute the virtual grid from the mesh.
+static void mesh_subdivide(void) {
+  uint8_t vx, vy;
+  int k;
+
+  if (mesh.nx < 2 || mesh.ny < 2) {
+    vnx = vny = 0;
+    return;
+  }
+  vnx = (uint8_t)((mesh.nx - 1) * MESH_SUBDIVISIONS + 1);
+  vny = (uint8_t)((mesh.ny - 1) * MESH_SUBDIVISIONS + 1);
+  vdx = (float)mesh.dx / (float)MESH_SUBDIVISIONS;
+  vdy = (float)mesh.dy / (float)MESH_SUBDIVISIONS;
+  for (vy = 0; vy < vny; vy++) {
+    int iy = vy / MESH_SUBDIVISIONS;
+    float ty = (float)(vy % MESH_SUBDIVISIONS) / (float)MESH_SUBDIVISIONS;
+
+    if (iy > mesh.ny - 2) {
+      iy = mesh.ny - 2;
+      ty = 1.f;
+    }
+    for (vx = 0; vx < vnx; vx++) {
+      int ix = vx / MESH_SUBDIVISIONS;
+      float tx = (float)(vx % MESH_SUBDIVISIONS) / (float)MESH_SUBDIVISIONS;
+      float row[4], z;
+
+      if (ix > mesh.nx - 2) {
+        ix = mesh.nx - 2;
+        tx = 1.f;
+      }
+      for (k = 0; k < 4; k++)
+        row[k] = catmull_rom(mesh_point(ix - 1, iy - 1 + k),
+                             mesh_point(ix, iy - 1 + k),
+                             mesh_point(ix + 1, iy - 1 + k),
+                             mesh_point(ix + 2, iy - 1 + k), tx);
+      z = catmull_rom(row[0], row[1], row[2], row[3], ty);
+      if (z > 32767.f) z = 32767.f;
+      if (z < -32767.f) z = -32767.f;
+      vz[vy][vx] = (int16_t)floorf(z + 0.5f);
+    }
+  }
+}
+
+/// Mesh height at X, Y (um), bilinear between the virtual points,
+/// constant beyond the outer points.
 static float mesh_z(int32_t x, int32_t y) {
-  float fx = (float)(x - mesh.x0) / (float)mesh.dx;
-  float fy = (float)(y - mesh.y0) / (float)mesh.dy;
+  float fx = (float)(x - mesh.x0) / vdx;
+  float fy = (float)(y - mesh.y0) / vdy;
   float tx, ty, z0, z1;
   int ix, iy;
 
   if (fx < 0.0f) fx = 0.0f;
-  if (fx > (float)(mesh.nx - 1)) fx = (float)(mesh.nx - 1);
+  if (fx > (float)(vnx - 1)) fx = (float)(vnx - 1);
   if (fy < 0.0f) fy = 0.0f;
-  if (fy > (float)(mesh.ny - 1)) fy = (float)(mesh.ny - 1);
+  if (fy > (float)(vny - 1)) fy = (float)(vny - 1);
   ix = (int)fx;
   iy = (int)fy;
-  if (ix > mesh.nx - 2) ix = mesh.nx - 2;
-  if (iy > mesh.ny - 2) iy = mesh.ny - 2;
+  if (ix > vnx - 2) ix = vnx - 2;
+  if (iy > vny - 2) iy = vny - 2;
   tx = fx - (float)ix;
   ty = fy - (float)iy;
 
-  z0 = (float)mesh.z[iy][ix] * (1.0f - tx) + (float)mesh.z[iy][ix + 1] * tx;
-  z1 = (float)mesh.z[iy + 1][ix] * (1.0f - tx) + (float)mesh.z[iy + 1][ix + 1] * tx;
+  z0 = (float)vz[iy][ix] * (1.0f - tx) + (float)vz[iy][ix + 1] * tx;
+  z1 = (float)vz[iy + 1][ix] * (1.0f - tx) + (float)vz[iy + 1][ix + 1] * tx;
   return z0 * (1.0f - ty) + z1 * ty;
 }
 
@@ -86,7 +166,7 @@ int32_t bed_level_offset(const axes_int32_t axis) {
     offset += retract_hop_um;
   #endif
   #ifdef BED_LEVELING
-    if (mesh.active && mesh.nx) {
+    if (mesh.active && vnx) {
       float f = fade_factor(axis[Z]);
 
       if (f > 0.0f)
@@ -103,6 +183,11 @@ int32_t bed_level_offset(const axes_int32_t axis) {
 void zcorr_sync_logical(void) {
   axes_int32_t p;
   int32_t motor;
+
+  // Called after every change of the mesh.
+  #ifdef BED_LEVELING
+    mesh_subdivide();
+  #endif
 
   if (steps_per_m_P[Z] == 0)
     return;                             // Startup, settings not applied yet.
@@ -225,7 +310,7 @@ void bed_level_enqueue(TARGET *t) {
   float sx = (float)startpoint.axis[X], sy = (float)startpoint.axis[Y];
   float ex = (float)t->axis[X], ey = (float)t->axis[Y];
   float len = sqrtf((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy));
-  float tv[16], prev = 0.0f;
+  float tv[2 * VGRID], prev = 0.0f;
   uint8_t n = 0, i, k;
   uint8_t qs = emergency_quickstop_count();
   int32_t z0 = startpoint.axis[Z], dz = t->axis[Z] - z0;
@@ -237,20 +322,20 @@ void bed_level_enqueue(TARGET *t) {
     return;
   }
 
-  // Crossings with the grid lines, as a fraction of the move.
-  for (i = 0; i < mesh.nx; i++) {
-    float g = (float)(mesh.x0 + mesh.dx * i);
+  // Crossings with the (virtual) grid lines, as a fraction of the move.
+  for (i = 0; i < vnx; i++) {
+    float g = (float)mesh.x0 + vdx * (float)i;
 
     if ((g > sx && g < ex) || (g < sx && g > ex))
       tv[n++] = (g - sx) / (ex - sx);
   }
-  for (i = 0; i < mesh.ny; i++) {
-    float g = (float)(mesh.y0 + mesh.dy * i);
+  for (i = 0; i < vny; i++) {
+    float g = (float)mesh.y0 + vdy * (float)i;
 
     if ((g > sy && g < ey) || (g < sy && g > ey))
       tv[n++] = (g - sy) / (ey - sy);
   }
-  // Insertion sort, 14 values at most.
+  // Insertion sort, 2 * VGRID values at most.
   for (i = 1; i < n; i++) {
     float v = tv[i];
 

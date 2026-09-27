@@ -2350,6 +2350,9 @@
         <file>
             <name>$PROJ_DIR$\core\tmc.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\core\mpc.c</name>
+        </file>
     </group>
     <group>
         <name>display</name>
@@ -2460,6 +2463,9 @@
         <name>src</name>
         <file>
             <name>$PROJ_DIR$\src\bed_leveling.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\src\calibration.c</name>
         </file>
         <file>
             <name>$PROJ_DIR$\src\emergency_parser.c</name>

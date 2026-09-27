@@ -38,10 +38,11 @@
 #include "gcode_parse.h"
 #include "input_shaping.h"
 #include "tmc.h"
+#include "mpc.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except versions 1 to 6, which get converted.
-#define SETTINGS_VERSION 7
+/// except versions 1 to 7, which get converted.
+#define SETTINGS_VERSION 8
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -99,6 +100,36 @@
 #endif
 #ifndef BACKLASH_Z
   #define BACKLASH_Z 0.0
+#endif
+#ifndef JUNCTION_DEVIATION
+  #define JUNCTION_DEVIATION 0.0        // mm, 0 = classic jerk (M205 X Y Z).
+#endif
+#ifndef MIN_SEGMENT_TIME
+  #define MIN_SEGMENT_TIME 20000        // us, Marlin DEFAULT_MINSEGMENTTIME.
+#endif
+#ifndef FILAMENT_DIAMETER
+  #define FILAMENT_DIAMETER 1.75
+#endif
+#ifndef VOLUMETRIC_SPEED_LIMIT
+  #define VOLUMETRIC_SPEED_LIMIT 0.0    // mm^3/s, 0 = off.
+#endif
+#ifndef TMC_HYBRID_THRESHOLD_X
+  #define TMC_HYBRID_THRESHOLD_X 0
+#endif
+#ifndef TMC_HYBRID_THRESHOLD_Y
+  #define TMC_HYBRID_THRESHOLD_Y 0
+#endif
+#ifndef TMC_HYBRID_THRESHOLD_Z
+  #define TMC_HYBRID_THRESHOLD_Z 0
+#endif
+#ifndef TMC_HYBRID_THRESHOLD_E
+  #define TMC_HYBRID_THRESHOLD_E 0
+#endif
+#ifndef XZ_SKEW_FACTOR
+  #define XZ_SKEW_FACTOR 0.0
+#endif
+#ifndef YZ_SKEW_FACTOR
+  #define YZ_SKEW_FACTOR 0.0
 #endif
 #ifndef RETRACT_LENGTH
   #define RETRACT_LENGTH 3.0
@@ -209,6 +240,23 @@ typedef struct {
   int32_t    tool_offset[3];    ///< M218 T1, um.
   uint32_t   tmc_current[4];    ///< M906, mA.
   uint32_t   tmc_stealth;       ///< M569 S, bits.
+} settings_store_v7_t;
+
+/// Version 8: version 7 plus junction deviation and min. segment time
+/// (M205 J B), volumetric extrusion (M200), TMC hybrid threshold (M913),
+/// hotend model (M306), XZ / YZ skew (M852 J K), X twist (M423).
+typedef struct {
+  settings_store_v7_t v7;
+  uint32_t   junction_dev;
+  uint32_t   min_segment_us;
+  uint32_t   filament_dia;
+  uint32_t   vol_enabled;
+  uint32_t   vol_limit;
+  uint32_t   tmc_hybrid[4];
+  float      mpc[6];
+  int32_t    skew_xz;
+  int32_t    skew_yz;
+  int32_t    twist[7];
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -260,6 +308,24 @@ void settings_defaults(void) {
   settings.tmc_current[Z] = TMC_CURRENT_Z;
   settings.tmc_current[E] = TMC_CURRENT_E;
   settings.tmc_stealth = TMC_STEALTHCHOP;
+  settings.junction_dev = (uint32_t)(JUNCTION_DEVIATION * 1000. + 0.5);
+  settings.min_segment_us = MIN_SEGMENT_TIME;
+  settings.filament_dia = (uint32_t)(FILAMENT_DIAMETER * 1000. + 0.5);
+  settings.vol_enabled = 0;
+  settings.vol_limit = (uint32_t)(VOLUMETRIC_SPEED_LIMIT * 1000. + 0.5);
+  settings.tmc_hybrid[X] = TMC_HYBRID_THRESHOLD_X;
+  settings.tmc_hybrid[Y] = TMC_HYBRID_THRESHOLD_Y;
+  settings.tmc_hybrid[Z] = TMC_HYBRID_THRESHOLD_Z;
+  settings.tmc_hybrid[E] = TMC_HYBRID_THRESHOLD_E;
+  settings.skew_xz = (int32_t)(XZ_SKEW_FACTOR * 1000000. +
+                               (XZ_SKEW_FACTOR < 0 ? -0.5 : 0.5));
+  settings.skew_yz = (int32_t)(YZ_SKEW_FACTOR * 1000000. +
+                               (YZ_SKEW_FACTOR < 0 ? -0.5 : 0.5));
+  for (i = 0; i < 7; i++)
+    settings.twist[i] = 0;
+  #ifdef HOTEND_MPC
+    mpc_defaults();
+  #endif
   settings.retract_length = (uint32_t)(RETRACT_LENGTH * 1000. + 0.5);
   settings.retract_feedrate = (uint32_t)(RETRACT_FEEDRATE * 60. + 0.5);
   settings.retract_zlift = (int32_t)(RETRACT_ZLIFT * 1000. + 0.5);
@@ -339,9 +405,10 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
-  settings_store_v6_t *v6 = &store.v6;
-  settings_store_v5_t *v5 = &store.v6.v5;
-  settings_store_v2_t *v2 = &store.v6.v5.v4.v3.v2;
+  settings_store_v7_t *v7 = &store.v7;
+  settings_store_v6_t *v6 = &store.v7.v6;
+  settings_store_v5_t *v5 = &store.v7.v6.v5;
+  settings_store_v2_t *v2 = &store.v7.v6.v5.v4.v3.v2;
   uint8_t a;
 
   memset(&store, 0, sizeof(store));
@@ -385,14 +452,27 @@ uint8_t settings_save(void) {
   v6->host_timeout = settings.host_timeout;
   v6->host_lost_temp = settings.host_lost_temp;
   v6->plr_enabled = settings.plr_enabled;
-  store.backlash_x = settings.backlash_x;
-  store.backlash_y = settings.backlash_y;
-  store.backlash_s = settings.backlash_s;
+  v7->backlash_x = settings.backlash_x;
+  v7->backlash_y = settings.backlash_y;
+  v7->backlash_s = settings.backlash_s;
   for (a = 0; a < 3; a++)
-    store.tool_offset[a] = settings.tool_offset[a];
+    v7->tool_offset[a] = settings.tool_offset[a];
   for (a = 0; a < 4; a++)
-    store.tmc_current[a] = settings.tmc_current[a];
-  store.tmc_stealth = settings.tmc_stealth;
+    v7->tmc_current[a] = settings.tmc_current[a];
+  v7->tmc_stealth = settings.tmc_stealth;
+  store.junction_dev = settings.junction_dev;
+  store.min_segment_us = settings.min_segment_us;
+  store.filament_dia = settings.filament_dia;
+  store.vol_enabled = settings.vol_enabled;
+  store.vol_limit = settings.vol_limit;
+  for (a = 0; a < 4; a++)
+    store.tmc_hybrid[a] = settings.tmc_hybrid[a];
+  for (a = 0; a < 6; a++)
+    store.mpc[a] = settings.mpc[a];
+  store.skew_xz = settings.skew_xz;
+  store.skew_yz = settings.skew_yz;
+  for (a = 0; a < 7; a++)
+    store.twist[a] = settings.twist[a];
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -494,32 +574,76 @@ static void load_v6(const settings_store_v6_t *v6) {
     settings.plr_enabled = v6->plr_enabled;
 }
 
-uint8_t settings_load(void) {
-  static settings_store_t store;
-  settings_store_v6_t *v6 = &store.v6;
-  settings_store_v5_t *v5 = &store.v6.v5;
-  settings_store_v4_t *v4 = &store.v6.v5.v4;
-  settings_store_v3_t *v3 = &store.v6.v5.v4.v3;
+/// Version 7 part from the store.
+static void load_v7(const settings_store_v7_t *v7) {
   uint8_t a;
 
+  load_v6(&v7->v6);
+  if (v7->backlash_x <= 5000UL)
+    settings.backlash_x = v7->backlash_x;
+  if (v7->backlash_y <= 5000UL)
+    settings.backlash_y = v7->backlash_y;
+  if (v7->backlash_s <= 100000UL)
+    settings.backlash_s = v7->backlash_s;
+  for (a = 0; a < 3; a++)
+    if (v7->tool_offset[a] >= -500000L && v7->tool_offset[a] <= 500000L)
+      settings.tool_offset[a] = v7->tool_offset[a];
+  for (a = 0; a < 4; a++)
+    if (v7->tmc_current[a] >= 50 && v7->tmc_current[a] <= 2500)
+      settings.tmc_current[a] = v7->tmc_current[a];
+  if (v7->tmc_stealth <= 0x0F)
+    settings.tmc_stealth = v7->tmc_stealth;
+}
+
+/// Version 8 part from the store.
+static void load_v8(const settings_store_t *st) {
+  uint8_t a;
+
+  load_v7(&st->v7);
+  if (st->junction_dev <= 1000UL)
+    settings.junction_dev = st->junction_dev;
+  if (st->min_segment_us <= 1000000UL)
+    settings.min_segment_us = st->min_segment_us;
+  if (st->filament_dia >= 500 && st->filament_dia <= 5000)
+    settings.filament_dia = st->filament_dia;
+  if (st->vol_enabled <= 1)
+    settings.vol_enabled = st->vol_enabled;
+  if (st->vol_limit <= 1000000UL)
+    settings.vol_limit = st->vol_limit;
+  for (a = 0; a < 4; a++)
+    if (st->tmc_hybrid[a] <= 1000)
+      settings.tmc_hybrid[a] = st->tmc_hybrid[a];
+  // NaN fails the comparison.
+  for (a = 0; a < 6; a++)
+    if (st->mpc[a] >= 0.f && st->mpc[a] < 10000.f)
+      settings.mpc[a] = st->mpc[a];
+  if (st->skew_xz >= -100000L && st->skew_xz <= 100000L)
+    settings.skew_xz = st->skew_xz;
+  if (st->skew_yz >= -100000L && st->skew_yz <= 100000L)
+    settings.skew_yz = st->skew_yz;
+  for (a = 0; a < 7; a++)
+    if (st->twist[a] >= -5000L && st->twist[a] <= 5000L)
+      settings.twist[a] = st->twist[a];
+}
+
+uint8_t settings_load(void) {
+  static settings_store_t store;
+  settings_store_v7_t *v7 = &store.v7;
+  settings_store_v6_t *v6 = &store.v7.v6;
+  settings_store_v5_t *v5 = &store.v7.v6.v5;
+  settings_store_v4_t *v4 = &store.v7.v6.v5.v4;
+  settings_store_v3_t *v3 = &store.v7.v6.v5.v4.v3;
+
   if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    load_v6(v6);
-    if (store.backlash_x <= 5000UL)
-      settings.backlash_x = store.backlash_x;
-    if (store.backlash_y <= 5000UL)
-      settings.backlash_y = store.backlash_y;
-    if (store.backlash_s <= 100000UL)
-      settings.backlash_s = store.backlash_s;
-    for (a = 0; a < 3; a++)
-      if (store.tool_offset[a] >= -500000L && store.tool_offset[a] <= 500000L)
-        settings.tool_offset[a] = store.tool_offset[a];
-    for (a = 0; a < 4; a++)
-      if (store.tmc_current[a] >= 50 && store.tmc_current[a] <= 2500)
-        settings.tmc_current[a] = store.tmc_current[a];
-    if (store.tmc_stealth <= 0x0F)
-      settings.tmc_stealth = store.tmc_stealth;
+    load_v8(&store);
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
+    return 1;
+  }
+
+  if (flash_store_read(v7, sizeof(*v7), 7)) {
+    load_v7(v7);
+    report_old(v7, sizeof(*v7));
     return 1;
   }
 
@@ -585,6 +709,27 @@ static void write_milli2(int32_t milli) {
   serial_writechar((char)('0' + (v / 10) % 10));
   serial_writechar((char)('0' + v % 10));
 }
+
+#ifdef SKEW_CORRECTION
+/// A millionths value with six decimals.
+static void write_micro(int32_t k) {
+  uint32_t a;
+  uint8_t n;
+
+  if (k < 0) {
+    serial_writechar('-');
+    k = -k;
+  }
+  a = (uint32_t)k;
+  serwrite_uint32(a / 1000000UL);
+  serial_writechar('.');
+  for (n = 0, a %= 1000000UL; n < 6; n++) {
+    a *= 10;
+    serial_writechar((char)('0' + a / 1000000UL));
+    a %= 1000000UL;
+  }
+}
+#endif
 
 /// " X<a> Y<b> Z<c> E<d>" with thousandths values.
 static void write_axes(const char *cmd, int32_t x, int32_t y, int32_t z,
@@ -683,25 +828,14 @@ void settings_report(void) {
   #endif
 
   #ifdef SKEW_CORRECTION
-    serial_writestr("echo:; Skew factor XY (tangent):\n");
+    serial_writestr("echo:; Skew factors XY, XZ, YZ (tangent):\n");
     serial_writestr("echo:  M852 I");
-    {
-      int32_t k = s->skew_xy;
-      uint32_t a;
-      uint8_t n;
-
-      if (k < 0) {
-        serial_writechar('-');
-        k = -k;
-      }
-      a = (uint32_t)k;
-      serwrite_uint32(a / 1000000UL);
-      serial_writechar('.');
-      for (n = 0, a %= 1000000UL; n < 6; n++) {
-        a *= 10;
-        serial_writechar((char)('0' + a / 1000000UL));
-        a %= 1000000UL;
-      }
+    write_micro(s->skew_xy);
+    if (s->skew_xz || s->skew_yz) {
+      serial_writestr(" J");
+      write_micro(s->skew_xz);
+      serial_writestr(" K");
+      write_micro(s->skew_yz);
     }
     serial_writechar('\n');
   #endif
@@ -747,6 +881,11 @@ void settings_report(void) {
   write_axes("M205", (int32_t)(s->max_jerk[X] * 50 / 3),
              (int32_t)(s->max_jerk[Y] * 50 / 3), (int32_t)(s->max_jerk[Z] * 50 / 3),
              (int32_t)(s->max_jerk[E] * 50 / 3), 1);
+  serial_writestr("echo:; Volumetric: S<on> D<filament mm> L<max mm^3/s>:\n");
+  sersendf_P(("echo:  M200 S%lu D%lq L%lq\n"), s->vol_enabled, s->filament_dia,
+             s->vol_limit);
+  serial_writestr("echo:; Junction deviation J<mm> (0 = jerk), min. segment time B<us>:\n");
+  sersendf_P(("echo:  M205 B%lu J%lq\n"), s->min_segment_us, s->junction_dev);
 
   #ifdef TMC_UART
     serial_writestr("echo:; Stepper driver current (mA), stealthChop:\n");
@@ -771,6 +910,10 @@ void settings_report(void) {
     serial_writestr("echo:; Hotend PID:\n");
     report_pid("M301", HEATER_EXTRUDER);
   #endif
+  #ifdef HOTEND_MPC
+    serial_writestr("echo:; Hotend model (MPC): P<W> C<J/K> R<1/s> A<W/K> F<W/K fan> H<J/K/mm>:\n");
+    mpc_report();
+  #endif
   #ifdef HEATER_BED
     serial_writestr("echo:; Bed PID:\n");
     report_pid("M304", HEATER_BED);
@@ -786,6 +929,13 @@ void settings_report(void) {
   #ifdef Z_PROBE
     serial_writestr("echo:; Z-Probe Offset (mm):\n");
     write_axes("M851", probe_offset[X], probe_offset[Y], probe_offset[Z], 0, 0);
+    serial_writestr("echo:; X axis twist compensation (M423 X<point> Z<mm>):\n");
+    {
+      uint8_t i;
+
+      for (i = 0; i < TWIST_POINTS; i++)
+        sersendf_P(("echo:  M423 X%su Z%lq\n"), i, s->twist[i]);
+    }
   #endif
   #ifdef FILAMENT_RUNOUT_PIN
     serial_writestr("echo:; Filament runout sensor:\n");

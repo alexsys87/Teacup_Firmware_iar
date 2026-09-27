@@ -59,6 +59,13 @@ typedef struct {
 
 #ifdef BED_LEVELING
 
+#ifndef MESH_SUBDIVISIONS
+  #define MESH_SUBDIVISIONS 1
+#endif
+#if MESH_SUBDIVISIONS < 1 || MESH_SUBDIVISIONS > 5
+  #error MESH_SUBDIVISIONS must be 1..5.
+#endif
+
 extern mesh_t mesh;
 
 /// Defaults: no mesh, leveling off, configured fade height.
