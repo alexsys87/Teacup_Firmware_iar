@@ -172,13 +172,18 @@ DEFINE_HOMING(x_negative, y_negative, z_negative)
 #define SKEW_CORRECTION
 #define XY_SKEW_FACTOR           0.0
 
-/** \def BACKLASH_COMPENSATION BACKLASH_Z
-  Z backlash compensation (M425 Z F, like Marlin): M5 threaded rods with
-  plain nuts have 0.05..0.2 mm play. When Z reverses, that many extra
-  steps take it up. BACKLASH_Z in mm, 0 = off.
+/** \def BACKLASH_COMPENSATION BACKLASH_X BACKLASH_Y BACKLASH_Z BACKLASH_SMOOTHING
+  Backlash compensation (M425 X Y Z F S, like Marlin): M5 threaded rods
+  with plain nuts have 0.05..0.2 mm play, worn belts or pulleys some
+  hundredths. When an axis reverses, that many extra steps take it up.
+  In mm, 0 = off. BACKLASH_SMOOTHING: spread the correction over this
+  many mm of moves (0 = all in the first move after the reversal).
 */
 #define BACKLASH_COMPENSATION
+#define BACKLASH_X               0.0
+#define BACKLASH_Y               0.0
 #define BACKLASH_Z               0.0
+#define BACKLASH_SMOOTHING       0.0
 
 /** \def FIRMWARE_RETRACT RETRACT_LENGTH RETRACT_FEEDRATE RETRACT_ZLIFT RETRACT_RECOVER_LENGTH RETRACT_RECOVER_FEEDRATE
   Firmware retract (G10 / G11, like Marlin's FWRETRACT): the slicer sends

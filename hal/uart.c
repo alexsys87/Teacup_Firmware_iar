@@ -27,6 +27,8 @@
 #include "atomic.h"
 #include "emergency_parser.h"
 
+#ifndef NO_SERIAL_UART
+
 #ifndef BAUD
   #define BAUD 115200
 #endif
@@ -611,3 +613,5 @@ int16_t uart_rx_poll(void) {
 
 
 #endif /* SERIAL_DMA */
+
+#endif /* NO_SERIAL_UART */

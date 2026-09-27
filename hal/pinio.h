@@ -309,13 +309,54 @@ TEACUP_INLINE void step_pulse_wait(uint32_t start) {
   Extruder
 */
 
-#if defined E_STEP_PIN && defined E_DIR_PIN
-  #define _e_step(st)           WRITE(E_STEP_PIN, st)
-  #define e_step()              _e_step(1)
-  #ifndef E_INVERT_DIR
-    #define e_direction(dir)    WRITE(E_DIR_PIN, dir)
+/**
+  EXTRUDERS 2: second extruder motor on E1_STEP_PIN / E1_DIR_PIN
+  (E1_INVERT_DIR, optional E1_ENABLE_PIN / E1_INVERT_ENABLE). T0 / T1
+  select the motor E moves go to (active_extruder, changed only with the
+  queue empty). Both extruders share E steps per mm (M92 E), the hotend
+  heater and the E coordinate. E1 always steps by GPIO pulses.
+*/
+#ifndef EXTRUDERS
+  #define EXTRUDERS 1
+#endif
+#if EXTRUDERS < 1 || EXTRUDERS > 2
+  #error EXTRUDERS must be 1 or 2.
+#endif
+#if EXTRUDERS == 2
+  #if ! (defined E1_STEP_PIN && defined E1_DIR_PIN)
+    #error EXTRUDERS 2 needs E1_STEP_PIN and E1_DIR_PIN.
+  #endif
+  #if ! (defined E_STEP_PIN && defined E_DIR_PIN)
+    #error EXTRUDERS 2 needs E_STEP_PIN and E_DIR_PIN.
+  #endif
+  /// Extruder motor of E moves, 0 or 1 (T0 / T1).
+  extern volatile uint8_t active_extruder;
+  #ifndef E1_INVERT_DIR
+    #define _e1_direction(dir)  WRITE(E1_DIR_PIN, dir)
   #else
-    #define e_direction(dir)    WRITE(E_DIR_PIN, (dir) ^ 1)
+    #define _e1_direction(dir)  WRITE(E1_DIR_PIN, (dir) ^ 1)
+  #endif
+#else
+  #define active_extruder       0
+  #define _e1_direction(dir)    do { } while (0)
+#endif
+
+#if defined E_STEP_PIN && defined E_DIR_PIN
+  #if EXTRUDERS == 2
+    #define _e_step(st)         do { if (active_extruder) \
+                                       WRITE(E1_STEP_PIN, st); \
+                                     else WRITE(E_STEP_PIN, st); } while (0)
+  #else
+    #define _e_step(st)         WRITE(E_STEP_PIN, st)
+  #endif
+  #define e_step()              _e_step(1)
+  // Both direction pins: the idle motor doesn't step anyway.
+  #ifndef E_INVERT_DIR
+    #define e_direction(dir)    do { WRITE(E_DIR_PIN, dir); \
+                                     _e1_direction(dir); } while (0)
+  #else
+    #define e_direction(dir)    do { WRITE(E_DIR_PIN, (dir) ^ 1); \
+                                     _e1_direction(dir); } while (0)
   #endif
 #else
   #define _e_step(st)           do { } while (0)
@@ -348,10 +389,15 @@ TEACUP_INLINE void step_pulse_wait(uint32_t start) {
 #else
   #define STEP_E_BIT(idx) 0UL
 #endif
+#if EXTRUDERS == 2
+  #define STEP_E1_BIT(idx) STEP_BIT(E1_STEP_PIN, idx)
+#else
+  #define STEP_E1_BIT(idx) 0UL
+#endif
 
 /// All step pins on port idx.
 #define STEP_PORT_MASK(idx) (STEP_X_BIT(idx) | STEP_Y_BIT(idx) | \
-  STEP_Z_BIT(idx) | STEP_Z2_BIT(idx) | STEP_E_BIT(idx))
+  STEP_Z_BIT(idx) | STEP_Z2_BIT(idx) | STEP_E_BIT(idx) | STEP_E1_BIT(idx))
 
 /// Step pins to raise, per port, collected by dda_step().
 typedef struct {
@@ -381,7 +427,13 @@ typedef struct {
 #else
   #define step_add_z(s)   STEP_ADD_BITS(s, STEP_ZZ2_BIT)
 #endif
-#define step_add_e(s)   STEP_ADD_BITS(s, STEP_E_BIT)
+#if EXTRUDERS == 2
+  #define step_add_e(s) do { if (active_extruder) \
+                               STEP_ADD_BITS(s, STEP_E1_BIT); \
+                             else STEP_ADD_BITS(s, STEP_E_BIT); } while (0)
+#else
+  #define step_add_e(s) STEP_ADD_BITS(s, STEP_E_BIT)
+#endif
 
 /// Whether any GPIO step pin is to be raised.
 #define step_set_any(s) \
@@ -403,7 +455,10 @@ typedef struct {
                           else step_add_y(s); } while (0)
   #define step_z(s)  do { if (step_timer[2]) STEP_TRIGGER(step_timer[2]); \
                           else step_add_z(s); } while (0)
-  #define step_e(s)  do { if (step_timer[3]) STEP_TRIGGER(step_timer[3]); \
+  /// Timer of the active extruder, NULL = GPIO pulses (E1 always).
+  #define step_timer_e()  (active_extruder ? (TIM_TypeDef *)0 : step_timer[3])
+  #define step_e(s)  do { TIM_TypeDef *_t = step_timer_e(); \
+                          if (_t) STEP_TRIGGER(_t); \
                           else step_add_e(s); } while (0)
 #else
   #define step_x(s)  step_add_x(s)
@@ -506,12 +561,25 @@ TEACUP_INLINE void unstep_all(void) {
 
 #ifdef E_ENABLE_PIN
   #ifdef E_INVERT_ENABLE
-    #define e_enable()          WRITE(E_ENABLE_PIN, 0)
-    #define e_disable()         WRITE(E_ENABLE_PIN, 1)
+    #define _e0_en(v)           WRITE(E_ENABLE_PIN, (v) ^ 1)
   #else
-    #define e_enable()          WRITE(E_ENABLE_PIN, 1)
-    #define e_disable()         WRITE(E_ENABLE_PIN, 0)
+    #define _e0_en(v)           WRITE(E_ENABLE_PIN, v)
   #endif
+#else
+  #define _e0_en(v)             do { } while (0)
+#endif
+#if EXTRUDERS == 2 && defined E1_ENABLE_PIN
+  #ifdef E1_INVERT_ENABLE
+    #define _e1_en(v)           WRITE(E1_ENABLE_PIN, (v) ^ 1)
+  #else
+    #define _e1_en(v)           WRITE(E1_ENABLE_PIN, v)
+  #endif
+#else
+  #define _e1_en(v)             do { } while (0)
+#endif
+#if defined E_ENABLE_PIN || (EXTRUDERS == 2 && defined E1_ENABLE_PIN)
+  #define e_enable()            do { _e0_en(1); _e1_en(1); } while (0)
+  #define e_disable()           do { _e0_en(0); _e1_en(0); } while (0)
 #else
   #define e_enable()            do { } while (0)
   #define e_disable()           do { } while (0)

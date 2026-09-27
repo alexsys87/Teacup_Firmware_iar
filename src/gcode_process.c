@@ -43,6 +43,8 @@
 #include "host_watch.h"
 #include "power_loss.h"
 #include "print_stats.h"
+#include "spindle.h"
+#include "tmc.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -98,31 +100,49 @@ static void reapply_home_offsets(const int32_t old[3]) {
   }
 }
 
-/// Soft limits (X_MIN .. Z_MAX), shifted by the home offsets (M206).
+#if EXTRUDERS > 1
+/**
+  Tool change T0 / T1: waits until all moves and linear advance steps are
+  done, then switches the E motor and the coordinates to the new nozzle.
+*/
+static void tool_select(uint8_t t) {
+  enum axis_e a;
+
+  queue_wait();
+  active_extruder = t;
+  tool = t;
+  for (a = X; a <= Z; a++)
+    home_set_tool_shift(a, t ? settings.tool_offset[a] : 0);
+  sersendf_P(("echo:Active Extruder: %su\n"), t);
+}
+#endif
+
+/// Soft limits (X_MIN .. Z_MAX), shifted by the home offsets (M206) and the
+/// offset of the active tool (M218).
 static void apply_soft_limits(axes_int32_t axis) {
 	#ifdef	X_MIN
-    if (axis[X] < (int32_t)(X_MIN * 1000.) + home_offset[X])
-      axis[X] = (int32_t)(X_MIN * 1000.) + home_offset[X];
+    if (axis[X] < (int32_t)(X_MIN * 1000.) + (home_offset[X] + tool_shift[X]))
+      axis[X] = (int32_t)(X_MIN * 1000.) + (home_offset[X] + tool_shift[X]);
 	#endif
 	#ifdef	X_MAX
-    if (axis[X] > (int32_t)(X_MAX * 1000.) + home_offset[X])
-      axis[X] = (int32_t)(X_MAX * 1000.) + home_offset[X];
+    if (axis[X] > (int32_t)(X_MAX * 1000.) + (home_offset[X] + tool_shift[X]))
+      axis[X] = (int32_t)(X_MAX * 1000.) + (home_offset[X] + tool_shift[X]);
 	#endif
 	#ifdef	Y_MIN
-    if (axis[Y] < (int32_t)(Y_MIN * 1000.) + home_offset[Y])
-      axis[Y] = (int32_t)(Y_MIN * 1000.) + home_offset[Y];
+    if (axis[Y] < (int32_t)(Y_MIN * 1000.) + (home_offset[Y] + tool_shift[Y]))
+      axis[Y] = (int32_t)(Y_MIN * 1000.) + (home_offset[Y] + tool_shift[Y]);
 	#endif
 	#ifdef	Y_MAX
-    if (axis[Y] > (int32_t)(Y_MAX * 1000.) + home_offset[Y])
-      axis[Y] = (int32_t)(Y_MAX * 1000.) + home_offset[Y];
+    if (axis[Y] > (int32_t)(Y_MAX * 1000.) + (home_offset[Y] + tool_shift[Y]))
+      axis[Y] = (int32_t)(Y_MAX * 1000.) + (home_offset[Y] + tool_shift[Y]);
 	#endif
 	#ifdef	Z_MIN
-    if (axis[Z] < (int32_t)(Z_MIN * 1000.) + home_offset[Z])
-      axis[Z] = (int32_t)(Z_MIN * 1000.) + home_offset[Z];
+    if (axis[Z] < (int32_t)(Z_MIN * 1000.) + (home_offset[Z] + tool_shift[Z]))
+      axis[Z] = (int32_t)(Z_MIN * 1000.) + (home_offset[Z] + tool_shift[Z]);
 	#endif
 	#ifdef	Z_MAX
-    if (axis[Z] > (int32_t)(Z_MAX * 1000.) + home_offset[Z])
-      axis[Z] = (int32_t)(Z_MAX * 1000.) + home_offset[Z];
+    if (axis[Z] > (int32_t)(Z_MAX * 1000.) + (home_offset[Z] + tool_shift[Z]))
+      axis[Z] = (int32_t)(Z_MAX * 1000.) + (home_offset[Z] + tool_shift[Z]);
 	#endif
 }
 
@@ -304,8 +324,19 @@ void process_gcode_command(void) {
 	    //? Example: T1
 	    //?
 	    //? Select extruder number 1 to build with.  Extruder numbering starts at 0.
+	    //?
+	    //? With EXTRUDERS 2 the change happens right away, like in Marlin:
+	    //? waits for the queue, E moves go to the other motor, coordinates
+	    //? switch to the other nozzle (M218). The next move puts the new
+	    //? nozzle at the programmed place, T itself doesn't move.
 
 	    next_tool = next_target.T;
+	    #if EXTRUDERS > 1
+	      if (next_tool < EXTRUDERS)
+	        tool_select(next_tool);
+	      else
+	        serial_writestr("echo:T0 or T1 only\n");
+	    #endif
 	}
 
 	if (next_target.seen_G) {
@@ -322,7 +353,13 @@ void process_gcode_command(void) {
         temp_wait();
 				backup_f = next_target.target.F;
 				next_target.target.F = settings.max_feedrate[X] * 2L;
+				#ifdef SPINDLE_LASER
+					spindle_move_begin(0);        // Laser: G0 without power.
+				#endif
 				bed_level_enqueue(&next_target.target);
+				#ifdef SPINDLE_LASER
+					spindle_move_end();
+				#endif
 				next_target.target.F = backup_f;
 				break;
 
@@ -334,7 +371,16 @@ void process_gcode_command(void) {
 				//? Go in a straight line from the current (X, Y) point to the point (90.6, 13.8), extruding material as the move happens from the current extruded length to a length of 22.4 mm.
 				//?
         temp_wait();
+				#ifdef SPINDLE_LASER
+					// Laser: S on the line sets the power (LightBurn & co.).
+					if (next_target.seen_S)
+						spindle_set_inline(next_target.S);
+					spindle_move_begin(1);
+				#endif
 				bed_level_enqueue(&next_target.target);
+				#ifdef SPINDLE_LASER
+					spindle_move_end();
+				#endif
 				#ifdef HOST_WATCH
 					if ((gcode_active & GCODE_SOURCE_SERIAL) && next_target.seen_E)
 						host_watch_arm();
@@ -355,12 +401,25 @@ void process_gcode_command(void) {
         //? P adds full turns. Start = end with I/J is a full circle.
         //? PrusaSlicer's and Cura's arc fitting (ArcWelder) produce these.
         //?
-        if ( ! arc_move(next_target.G == 2))
-          serial_writestr_P(("echo:G2/G3 bad parameters\n"));
-        #ifdef HOST_WATCH
-          else if ((gcode_active & GCODE_SOURCE_SERIAL) && next_target.seen_E)
-            host_watch_arm();
-        #endif
+        {
+          uint8_t arc_ok;
+
+          #ifdef SPINDLE_LASER
+            if (next_target.seen_S)
+              spindle_set_inline(next_target.S);
+            spindle_move_begin(next_target.G);
+          #endif
+          arc_ok = arc_move(next_target.G == 2);
+          #ifdef SPINDLE_LASER
+            spindle_move_end();
+          #endif
+          if ( ! arc_ok)
+            serial_writestr_P(("echo:G2/G3 bad parameters\n"));
+          #ifdef HOST_WATCH
+            else if ((gcode_active & GCODE_SOURCE_SERIAL) && next_target.seen_E)
+              host_watch_arm();
+          #endif
+        }
         break;
 #endif
 
@@ -879,8 +938,35 @@ void process_gcode_command(void) {
 				next_target.option_e_relative = 1;
 				break;
 
+      #ifdef SPINDLE_LASER
+      case 3:
+      case 4:
+        //? --- M3, M4: Spindle / laser on ---
+        //?
+        //? Example: M3 S12000
+        //? Example: M4 S128
+        //?
+        //? S: power, 0..SPEED_POWER_MAX (full power without S). Spindle:
+        //? after the queued moves, M3 clockwise, M4 counter-clockwise
+        //? (SPINDLE_DIR_PIN). Laser (LASER_MODE): power of the following
+        //? G1 / G2 / G3 moves (G0 moves run without), M4 = dynamic power,
+        //? lower while accelerating, like Marlin.
+        //?
+        spindle_on(next_target.M == 3, next_target.seen_S,
+                   next_target.seen_S ? (uint32_t)next_target.S : 0);
+        break;
+
+      case 5:
+        //? --- M5: Spindle / laser off ---
+        //?
+        spindle_off();
+        break;
+      #endif
+
 			// M3/M101- extruder on
+			#ifndef SPINDLE_LASER
 			case 3:
+			#endif
 			case 101:
 				//? --- M101: extruder on ---
 				//?
@@ -892,7 +978,9 @@ void process_gcode_command(void) {
 				break;
 
 			// M5/M103- extruder off
+			#ifndef SPINDLE_LASER
 			case 5:
+			#endif
 			case 103:
 				//? --- M103: extruder off ---
 				//?
@@ -1025,7 +1113,7 @@ void process_gcode_command(void) {
           #ifdef HEATER_FAN
             next_target.P = HEATER_FAN;
           #else
-            next_target.P = 0;
+            break;                  // No fan (not heater 0, the hotend).
           #endif
 				if ( ! next_target.seen_S)
 					break;
@@ -1274,6 +1362,45 @@ void process_gcode_command(void) {
         //?
         queue_wait();
         break;
+
+#if EXTRUDERS > 1
+      case 218:
+        //? --- M218: Set tool offset ---
+        //?
+        //? Example: M218 T1 X20 Y0.5 Z-0.2
+        //?
+        //? Position of the T1 nozzle relative to the T0 nozzle, mm (T0 has
+        //? no offset). Takes effect right away if T1 is active. Without
+        //? X, Y, Z: report. Stored with M500.
+        //?
+        if (next_target.seen_T && next_target.T != 1) {
+          serial_writestr("echo:M218: T1 only\n");
+          break;
+        }
+        if (next_target.seen_X || next_target.seen_Y || next_target.seen_Z) {
+          enum axis_e ax;
+          uint8_t seen[3];
+
+          seen[X] = next_target.seen_X;
+          seen[Y] = next_target.seen_Y;
+          seen[Z] = next_target.seen_Z;
+          for (ax = X; ax <= Z; ax++) {
+            if ( ! seen[ax])
+              continue;
+            restore_axis_word(ax);
+            if (raw_axis[ax] < -500000L || raw_axis[ax] > 500000L) {
+              serial_writestr("echo:M218 out of range (+-500 mm)\n");
+              continue;
+            }
+            settings.tool_offset[ax] = raw_axis[ax];
+            if (active_extruder)
+              home_set_tool_shift(ax, raw_axis[ax]);
+          }
+        }
+        sersendf_P(("echo:M218 T1 X%lq Y%lq Z%lq\n"), settings.tool_offset[X],
+                   settings.tool_offset[Y], settings.tool_offset[Z]);
+        break;
+#endif
 
       case 206:
         //? --- M206: Set home offsets ---
@@ -1550,6 +1677,71 @@ void process_gcode_command(void) {
         break;
       #endif
 
+      #ifdef TMC_UART
+      case 906:
+        //? --- M906: TMC driver run current ---
+        //?
+        //? Example: M906 X800 Y800 Z800 E600
+        //?
+        //? RMS run current in mA (100..2000), hold current is
+        //? TMC_HOLD_MULTIPLIER of it. Takes effect right away, stored with
+        //? M500. Without parameters: report.
+        //?
+      case 569:
+        //? --- M569: stealthChop / spreadCycle ---
+        //?
+        //? Example: M569 S1 X Y     stealthChop (quiet) on X and Y
+        //? Example: M569 S0 E       spreadCycle on E
+        //?
+        //? Without axes: all axes. Without S: report. Stored with M500.
+        //?
+        {
+          uint8_t seen[4], a, any = 0;
+
+          seen_axes(seen);
+          for (a = X; a < AXIS_COUNT; a++) {
+            if ( ! seen[a])
+              continue;
+            restore_axis_word((enum axis_e)a);
+            any = 1;
+            if (next_target.M == 906) {
+              int32_t ma = raw_axis[a] / 1000;
+
+              if (ma >= 100 && ma <= 2000)
+                settings.tmc_current[a] = (uint32_t)ma;
+              else
+                serial_writestr("echo:M906 out of range (100..2000 mA)\n");
+            }
+            else if (next_target.seen_S) {
+              if (next_target.S)
+                settings.tmc_stealth |= 1UL << a;
+              else
+                settings.tmc_stealth &= ~(1UL << a);
+            }
+          }
+          if (next_target.M == 569 && next_target.seen_S && ! any) {
+            settings.tmc_stealth = next_target.S ? 0x0F : 0;
+            any = 1;
+          }
+          if (any && (next_target.M == 906 || next_target.seen_S)) {
+            queue_wait();
+            tmc_apply();
+          }
+          else
+            tmc_report_settings();
+        }
+        break;
+
+      case 122:
+        //? --- M122: TMC driver status ---
+        //?
+        //? Current, microsteps, chopper mode, temperature and short / open
+        //? load flags of all drivers.
+        //?
+        tmc_report();
+        break;
+      #endif
+
       #ifdef SKEW_CORRECTION
       case 852:
         //? --- M852: XY skew correction ---
@@ -1783,29 +1975,47 @@ void process_gcode_command(void) {
 
       #ifdef BACKLASH_COMPENSATION
       case 425:
-        //? --- M425: Z backlash compensation ---
+        //? --- M425: Backlash compensation ---
         //?
-        //? Example: M425 Z0.1 F1
+        //? Example: M425 X0.1 Y0.1 Z0.2 F1 S3
         //?
-        //? Z: backlash of the Z axis in mm (0..5), F: fraction of it to
-        //? correct (0..1, default 1), like Marlin. When Z reverses, that
-        //? many extra steps take up the play. Without parameters: report.
+        //? X, Y, Z: backlash of the axis in mm (0..5), F: fraction of it to
+        //? correct (0..1, default 1), S: smoothing, the correction is spread
+        //? over this many mm of moves (0 = all in the first move), like
+        //? Marlin. When an axis reverses, extra steps take up the play.
+        //? Without parameters: report.
         //?
-        if (next_target.seen_Z || next_target.seen_F) {
-          if (next_target.seen_Z) {
-            int32_t z = raw_axis[Z];
+        if (next_target.seen_X || next_target.seen_Y || next_target.seen_Z ||
+            next_target.seen_F || next_target.seen_S) {
+          uint8_t seen[4];
+          enum axis_e a;
+          uint32_t *play[3] = { &settings.backlash_x, &settings.backlash_y,
+                                &settings.backlash_z };
 
-            restore_axis_word(Z);
-            if (z >= 0 && z <= 5000)
-              settings.backlash_z = (uint32_t)z;
+          seen_axes(seen);
+          for (a = X; a <= Z; a++) {
+            int32_t v = raw_axis[a];
+
+            if ( ! seen[a])
+              continue;
+            restore_axis_word(a);
+            if (v >= 0 && v <= 5000)
+              *play[a] = (uint32_t)v;
             else
-              serial_writestr("echo:M425 Z out of range (0..5)\n");
+              serial_writestr("echo:M425 value out of range (0..5)\n");
           }
           if (next_target.seen_F) {
             if (next_target.F_milli >= 0 && next_target.F_milli <= 1000)
               settings.backlash_f = (uint32_t)next_target.F_milli;
             else
               serial_writestr("echo:M425 F out of range (0..1)\n");
+          }
+          if (next_target.seen_S) {
+            // S is an integer parameter; S2 = 2 mm, like Marlin's S2.
+            if (next_target.S >= 0 && next_target.S <= 100)
+              settings.backlash_s = (uint32_t)next_target.S * 1000;
+            else
+              serial_writestr("echo:M425 S out of range (0..100)\n");
           }
         }
         else {
@@ -1938,6 +2148,13 @@ void process_gcode_command(void) {
           settings_apply();
           dda_new_startpoint();
           reapply_home_offsets(old);
+          tmc_apply();
+          #if EXTRUDERS > 1
+            // T1 active: its offset may have changed.
+            if (active_extruder)
+              for (i = X; i <= Z; i++)
+                home_set_tool_shift((enum axis_e)i, settings.tool_offset[i]);
+          #endif
         }
         break;
 

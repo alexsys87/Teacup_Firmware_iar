@@ -13,6 +13,8 @@ Checks:
   - M852 without parameters and M503 report the factor
   - M425 Z0.1: Z reversals get 0.1 mm (800 steps) extra, moves in the
     same direction none, M114 Z unaffected; M425 F0.5 half of it
+  - M425 X / Y: the same on X and Y; S2 spreads the correction over 2 mm
+    of moves (share distance / S per move), S0 all in the first move
   - G10 / G11 (M207 S F Z, M208 S F): E retract and prime, Z lift kept
     for travel moves, G-code coordinates unchanged, repeated G10 ignored
   - G28 X / G28 Y lift Z to Z_HOMING_HEIGHT first, only once
@@ -113,6 +115,18 @@ mark('bl_z2b'); send('G1 Z2\n'); run('1.0')           # reversal
 mark('bl_pos'); send('M114\n'); run('0.05')
 mark('bl_half'); send('M425 F0.5\nG1 Z1\n'); run('1.0')
 mark('bl_report'); send('M425\n'); run('0.1')
+
+# ---- M425 X / Y backlash, smoothing (F0.5 still: 0.1 mm -> 8 steps) ----
+mark('bx_x10'); send('M425 Z0 X0.1 S2\nG1 X10 F3000\n'); run('1.0')  # reversal, 10 mm >= S: all 8
+mark('bx_x9'); send('G1 X9\n'); run('0.4')           # reversal, 1 mm of S2: half (4)
+mark('bx_x8'); send('G1 X8\n'); run('0.4')           # half of the rest (2)
+mark('bx_x4'); send('G1 X4\n'); run('0.6')           # 4 mm: the rest (2)
+mark('bx_s0'); send('M425 S0\nG1 X10\n'); run('0.8')  # reversal, no smoothing: all 8
+mark('bx_pos'); send('M114\n'); run('0.05')
+mark('by_y5'); send('M425 X0 Y0.1\nG1 Y5\n'); run('0.6')   # Y reversal: 8
+mark('by_y0'); send('G1 Y0\n'); run('0.6')           # reversal: 8
+mark('bx_report'); send('M425\n'); run('0.1')
+mark('bx_off'); send('M425 Y0\nG1 X0\n'); run('0.8')   # off: no extra
 
 # ---- G10 / G11 firmware retract ----
 send('M425 Z0\nG92 E0\n'); run('0.1')
@@ -215,7 +229,14 @@ zs = [pulses(s, 'Z') for s in ('bl_z1', 'bl_z2', 'bl_z15', 'bl_z1b', 'bl_z2b')]
 check('backlash: extra 800 steps on reversals only', zs == [8000, 8000, 4800, 4000, 8800], zs)
 check('  M114 Z2', pos('bl_pos') is not None and pos('bl_pos')[2] == 2.0, pos('bl_pos'))
 check('  M425 F0.5: 400 extra', pulses('bl_half', 'Z') == 8400, pulses('bl_half', 'Z'))
-check('  M425 reported', line('bl_report', 'M425') == 'M425 F0.50 Z0.10', uart('bl_report'))
+check('  M425 reported', line('bl_report', 'M425') == 'M425 F0.50 S0.00 X0.00 Y0.00 Z0.10', uart('bl_report'))
+xs = [pulses(s, 'X') for s in ('bx_x10', 'bx_x9', 'bx_x8', 'bx_x4', 'bx_s0')]
+check('backlash X, S2: 8, 4 + 2 + 2, then S0: 8', xs == [1608, 164, 162, 642, 968], xs)
+check('  M114 X10', pos('bx_pos') is not None and pos('bx_pos')[0] == 10.0, pos('bx_pos'))
+ys = [pulses(s, 'Y') for s in ('by_y5', 'by_y0')]
+check('backlash Y: 8 extra on both reversals', ys == [808, 808], ys)
+check('  M425 reported', line('bx_report', 'M425') == 'M425 F0.50 S0.00 X0.00 Y0.10 Z0.00', uart('bx_report'))
+check('  off: no extra', pulses('bx_off', 'X') == 1600, pulses('bx_off', 'X'))
 check('M207 reported', line('rt_set', 'M207') == 'M207 S1.50 F1500.00 Z0.20', uart('rt_set'))
 check('G10: 1.5 mm E back, 0.2 mm Z up', pulses('rt_g10', 'E') == 2508 and pulses('rt_g10', 'Z') == 1600,
       (pulses('rt_g10', 'E'), pulses('rt_g10', 'Z')))
@@ -246,9 +267,9 @@ p = pos('hl_pos')
 check('  parked at X10 Y170, Z + 10', p is not None and p[:3] == (10.0, 170.0, 15.0), p)
 check('  hotend target 0', any(re.match(r'ok T:[\d.]+/0\.0 ', l) for l in uart('hl_pos')), uart('hl_pos'))
 check('M500 stores', any(l.startswith('echo:Settings Stored') for l in uart('st_save')), uart('st_save'))
-check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_def', 'M425') == 'M425 F1.00 Z0.00',
+check('M502: defaults', line('st_def', 'M852') == 'M852 I0.000000' and line('st_def', 'M425') == 'M425 F1.00 S0.00 X0.00 Y0.00 Z0.00',
       (line('st_def', 'M852'), line('st_def', 'M425')))
-check('M501: loaded', line('st_load', 'M852') == 'M852 I-0.002500' and line('st_load', 'M425') == 'M425 F0.50 Z0.00'
+check('M501: loaded', line('st_load', 'M852') == 'M852 I-0.002500' and line('st_load', 'M425') == 'M425 F0.50 S0.00 X0.00 Y0.00 Z0.00'
       and line('st_load', 'M207') == 'M207 S1.50 F1500.00 Z0.20',
       (line('st_load', 'M852'), line('st_load', 'M425')))
 PCF = {}

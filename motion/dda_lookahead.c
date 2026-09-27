@@ -48,8 +48,7 @@
  */
 TEACUP_HOT
 void dda_find_crossing_speed(DDA *prev, DDA *current) {
-  uint32_t F, dv, speed_factor, max_speed_factor;
-  axes_int32_t prevF, currF;
+  float F, dv, speed_factor, max_speed_factor, prevF, currF;
   enum axis_e i;
 
   // Joining needs identical steps per mm on X and Y (M92 can change them).
@@ -70,25 +69,13 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
 
   // We always look at the smaller of both combined speeds,
   // else we'd interpret intended speed changes as jerk.
-  F = prev->endpoint.F;
-  if (current->endpoint.F < F)
-    F = current->endpoint.F;
+  F = (float)prev->endpoint.F;
+  if ((float)current->endpoint.F < F)
+    F = (float)current->endpoint.F;
 
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
     sersendf_P(("Distance: %lu, then %lu\n"),
                prev->distance, current->distance);
-
-  // Find individual axis speeds. Eight muldiv()s, cheap since they use a
-  // 64 bit intermediate (UMULL + UDIV) instead of the AVR bit loop.
-  for (i = X; i < AXIS_COUNT; i++) {
-    prevF[i] = muldiv(prev->delta[i], F, prev->total_steps);
-    currF[i] = muldiv(current->delta[i], F, current->total_steps);
-  }
-
-  if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-    sersendf_P(("prevF: %ld  %ld  %ld  %ld\ncurrF: %ld  %ld  %ld  %ld\n"),
-               prevF[X], prevF[Y], prevF[Z], prevF[E],
-               currF[X], currF[Y], currF[Z], currF[E]);
 
   /**
    * What we want is (for each axis):
@@ -109,35 +96,36 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
    *   if x > 1: continue full speed
    *   if x < 1: v = v_max * x
    *
+   * Axis speeds are the share of each axis in F, delta / total_steps. All
+   * in float (FPU): no 16 bit limit for F, no fixed point factors.
+   *
    * See also: https://github.com/Traumflug/Teacup_Firmware/issues/45
    */
-  max_speed_factor = (uint32_t)2 << 8;
+  max_speed_factor = 2.f;
 
   for (i = X; i < AXIS_COUNT; i++) {
+    prevF = (float)prev->delta[i] * F / (float)prev->total_steps;
+    currF = (float)current->delta[i] * F / (float)current->total_steps;
     if (get_direction(prev, i) == get_direction(current, i))
-      dv = currF[i] > prevF[i] ? currF[i] - prevF[i] : prevF[i] - currF[i];
+      dv = fabsf(currF - prevF);
     else
-      dv = currF[i] + prevF[i];
+      dv = currF + prevF;
 
-    if (dv) {
-      speed_factor = (maximum_jerk_P[i] << 8) / dv;
+    if (dv > 0.f) {
+      speed_factor = (float)maximum_jerk_P[i] / dv;
       if (speed_factor < max_speed_factor)
         max_speed_factor = speed_factor;
-      if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-        sersendf_P(("%c: dv %lu of %lu   factor %lu of %lu\n"),
-                   'X' + i, dv, maximum_jerk_P[i],
-                   speed_factor, (uint32_t)1 << 8);
     }
   }
 
-  if (max_speed_factor >= ((uint32_t)1 << 8))
-    current->crossF = F;
+  if (max_speed_factor >= 1.f)
+    current->crossF = (uint32_t)F;
   else
-    current->crossF = (F * max_speed_factor) >> 8;
+    current->crossF = (uint32_t)(F * max_speed_factor);
 
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
     sersendf_P(("Cross speed reduction from %lu to %lu\n"),
-               F, current->crossF);
+               (uint32_t)F, current->crossF);
 
   return;
 }

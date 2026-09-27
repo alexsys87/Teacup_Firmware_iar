@@ -21,6 +21,7 @@
 */
 
 #include "pinio.h"
+#include "tmc.h"
 
 #ifdef Z_STEPPER_ALIGN
   volatile uint8_t z_step_mask = 3;
@@ -44,6 +45,10 @@ static void ps_on_off(void) {
 
 /// step/psu timeout
 volatile uint8_t psu_timeout = 0;
+
+#if EXTRUDERS == 2
+  volatile uint8_t active_extruder = 0;
+#endif
 
 /** Initialise all I/O.
 
@@ -94,6 +99,10 @@ void pinio_init(void) {
     WRITE(E_STEP_PIN, 0); SET_OUTPUT(E_STEP_PIN);
     WRITE(E_DIR_PIN, 0);  SET_OUTPUT(E_DIR_PIN);
   #endif
+  #if EXTRUDERS == 2
+    WRITE(E1_STEP_PIN, 0); SET_OUTPUT(E1_STEP_PIN);
+    WRITE(E1_DIR_PIN, 0);  SET_OUTPUT(E1_DIR_PIN);
+  #endif
 
   /// Enable pins, all start disabled.
   #ifdef STEPPER_ENABLE_PIN
@@ -118,6 +127,10 @@ void pinio_init(void) {
   #ifdef E_ENABLE_PIN
     e_disable();
     SET_OUTPUT(E_ENABLE_PIN);
+  #endif
+  #if EXTRUDERS == 2 && defined E1_ENABLE_PIN
+    e_disable();
+    SET_OUTPUT(E1_ENABLE_PIN);
   #endif
 
   ps_on_off();
@@ -145,6 +158,9 @@ void power_on(void) {
       delay_ms(10);
     #endif
     ps_is_on = 1;
+    #ifdef TMC_UART
+      tmc_power_up = 1;                 // Configure before the next move.
+    #endif
   }
 
   psu_timeout = 0;

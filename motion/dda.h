@@ -12,8 +12,10 @@
   #endif
 #endif
 
-// The distance of any move and a single axis should never go above this limit.
-// Check move_duration and c_limit calculations in dda.c
+/**
+  Search distance of homing and probing moves (1.79 m). The planner works
+  in float, so this is no overflow limit any more, moves may be longer.
+*/
 #define MAX_DELTA_UM ((int32_t)(UINT32_MAX / 2400L))
 
 // Enum to denote an axis
@@ -112,9 +114,7 @@ typedef struct {
       #endif
 
       // directions
-      // As we have muldiv() now, overflows became much less an issue and
-      // it's likely time to get rid of these flags and use int instead of
-      // uint for distance/speed calculations. --Traumflug 2014-07-04
+      // Directions of the axes, 1 = positive.
       uint8_t           x_direction   :1; ///< direction flag for X axis
       uint8_t           y_direction   :1; ///< direction flag for Y axis
       uint8_t           z_direction   :1; ///< direction flag for Z axis
@@ -147,6 +147,8 @@ typedef struct {
   uint32_t          c_min;
   /// Step interval from standstill, depends on the acceleration of the move
   uint32_t          c0;
+  /// c0 / 2 as float, for c = c0 / (2 * sqrt(n)) in the step interrupt.
+  float             c0_half;
   #ifdef LINEAR_ADVANCE
   /// Linear advance: advance in E steps = la_factor / c. 0 = none.
   float             la_factor;
@@ -197,6 +199,10 @@ typedef struct {
   /// The file line which created this move (SD / flash print), for
   /// core/power_loss.c.
   plr_line_t        plr;
+  #endif
+  #ifdef SPINDLE_LASER
+  /// Laser power of the move, PWM counts, bit 15: dynamic (M4).
+  uint16_t          laser_power;
   #endif
 } DDA;
 

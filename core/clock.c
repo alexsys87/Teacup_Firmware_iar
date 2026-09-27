@@ -25,6 +25,7 @@
 #include "filament.h"
 #include "babystep.h"
 #include "fans.h"
+#include "tmc.h"
 
 /**
   If the specific bit is set, execute the following block exactly once
@@ -117,6 +118,7 @@ static void clock_250ms(void) {
 
     temp_residency_tick();
     temp_periodic_print();
+    tmc_tick();
     gcode_queue_keepalive();
     steppers_idle_tick(mb_tail_dda != NULL || temp_wait_active() ||
                        filament_change_active());

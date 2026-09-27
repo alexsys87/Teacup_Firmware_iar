@@ -37,10 +37,11 @@
 #include "bed_leveling.h"
 #include "gcode_parse.h"
 #include "input_shaping.h"
+#include "tmc.h"
 
 /// Increment when the stored layout changes. Old records are ignored then,
-/// except versions 1 to 5, which get converted.
-#define SETTINGS_VERSION 6
+/// except versions 1 to 6, which get converted.
+#define SETTINGS_VERSION 7
 
 #ifndef MAX_ACCELERATION_X
   #define MAX_ACCELERATION_X ACCELERATION
@@ -62,6 +63,39 @@
 #endif
 #ifndef XY_SKEW_FACTOR
   #define XY_SKEW_FACTOR 0.0
+#endif
+#ifndef BACKLASH_X
+  #define BACKLASH_X 0.0
+#endif
+#ifndef BACKLASH_Y
+  #define BACKLASH_Y 0.0
+#endif
+#ifndef BACKLASH_SMOOTHING
+  #define BACKLASH_SMOOTHING 0.0
+#endif
+#ifndef TOOL_OFFSET_X
+  #define TOOL_OFFSET_X 0.0
+#endif
+#ifndef TOOL_OFFSET_Y
+  #define TOOL_OFFSET_Y 0.0
+#endif
+#ifndef TOOL_OFFSET_Z
+  #define TOOL_OFFSET_Z 0.0
+#endif
+#ifndef TMC_CURRENT_X
+  #define TMC_CURRENT_X 800
+#endif
+#ifndef TMC_CURRENT_Y
+  #define TMC_CURRENT_Y 800
+#endif
+#ifndef TMC_CURRENT_Z
+  #define TMC_CURRENT_Z 800
+#endif
+#ifndef TMC_CURRENT_E
+  #define TMC_CURRENT_E 600
+#endif
+#ifndef TMC_STEALTHCHOP
+  #define TMC_STEALTHCHOP 0x07          // X, Y, Z quiet, E spreadCycle.
 #endif
 #ifndef BACKLASH_Z
   #define BACKLASH_Z 0.0
@@ -163,6 +197,18 @@ typedef struct {
   uint32_t   host_timeout;      ///< M86 S, s.
   uint32_t   host_lost_temp;    ///< M86 E, C.
   uint32_t   plr_enabled;       ///< M413 S.
+} settings_store_v6_t;
+
+/// Version 7: version 6 plus backlash of X and Y, smoothing, tool offset
+/// (M218), TMC driver currents and stealthChop (M906, M569).
+typedef struct {
+  settings_store_v6_t v6;
+  uint32_t   backlash_x;        ///< M425 X, um.
+  uint32_t   backlash_y;        ///< M425 Y, um.
+  uint32_t   backlash_s;        ///< M425 S, um.
+  int32_t    tool_offset[3];    ///< M218 T1, um.
+  uint32_t   tmc_current[4];    ///< M906, mA.
+  uint32_t   tmc_stealth;       ///< M569 S, bits.
 } settings_store_t;
 
 uint32_t settings_axis_accel(enum axis_e axis) {
@@ -203,6 +249,17 @@ void settings_defaults(void) {
                                (XY_SKEW_FACTOR < 0 ? -0.5 : 0.5));
   settings.backlash_z = (uint32_t)(BACKLASH_Z * 1000. + 0.5);
   settings.backlash_f = 1000;
+  settings.backlash_x = (uint32_t)(BACKLASH_X * 1000. + 0.5);
+  settings.backlash_y = (uint32_t)(BACKLASH_Y * 1000. + 0.5);
+  settings.backlash_s = (uint32_t)(BACKLASH_SMOOTHING * 1000. + 0.5);
+  settings.tool_offset[X] = (int32_t)(TOOL_OFFSET_X * 1000.);
+  settings.tool_offset[Y] = (int32_t)(TOOL_OFFSET_Y * 1000.);
+  settings.tool_offset[Z] = (int32_t)(TOOL_OFFSET_Z * 1000.);
+  settings.tmc_current[X] = TMC_CURRENT_X;
+  settings.tmc_current[Y] = TMC_CURRENT_Y;
+  settings.tmc_current[Z] = TMC_CURRENT_Z;
+  settings.tmc_current[E] = TMC_CURRENT_E;
+  settings.tmc_stealth = TMC_STEALTHCHOP;
   settings.retract_length = (uint32_t)(RETRACT_LENGTH * 1000. + 0.5);
   settings.retract_feedrate = (uint32_t)(RETRACT_FEEDRATE * 60. + 0.5);
   settings.retract_zlift = (int32_t)(RETRACT_ZLIFT * 1000. + 0.5);
@@ -282,8 +339,9 @@ static void load_v1(const settings_store_v1_t *v1) {
 
 uint8_t settings_save(void) {
   static settings_store_t store;
-  settings_store_v5_t *v5 = &store.v5;
-  settings_store_v2_t *v2 = &store.v5.v4.v3.v2;
+  settings_store_v6_t *v6 = &store.v6;
+  settings_store_v5_t *v5 = &store.v6.v5;
+  settings_store_v2_t *v2 = &store.v6.v5.v4.v3.v2;
   uint8_t a;
 
   memset(&store, 0, sizeof(store));
@@ -315,18 +373,26 @@ uint8_t settings_save(void) {
     v5->is_type[a] = settings.is_type[a];
   }
   v5->s_curve_us = settings.s_curve_us;
-  store.pid_fan_ff = pid_get_fan_ff();
-  store.skew_xy = settings.skew_xy;
-  store.backlash_z = settings.backlash_z;
-  store.backlash_f = settings.backlash_f;
-  store.retract_length = settings.retract_length;
-  store.retract_feedrate = settings.retract_feedrate;
-  store.retract_zlift = settings.retract_zlift;
-  store.recover_extra = settings.recover_extra;
-  store.recover_feedrate = settings.recover_feedrate;
-  store.host_timeout = settings.host_timeout;
-  store.host_lost_temp = settings.host_lost_temp;
-  store.plr_enabled = settings.plr_enabled;
+  v6->pid_fan_ff = pid_get_fan_ff();
+  v6->skew_xy = settings.skew_xy;
+  v6->backlash_z = settings.backlash_z;
+  v6->backlash_f = settings.backlash_f;
+  v6->retract_length = settings.retract_length;
+  v6->retract_feedrate = settings.retract_feedrate;
+  v6->retract_zlift = settings.retract_zlift;
+  v6->recover_extra = settings.recover_extra;
+  v6->recover_feedrate = settings.recover_feedrate;
+  v6->host_timeout = settings.host_timeout;
+  v6->host_lost_temp = settings.host_lost_temp;
+  v6->plr_enabled = settings.plr_enabled;
+  store.backlash_x = settings.backlash_x;
+  store.backlash_y = settings.backlash_y;
+  store.backlash_s = settings.backlash_s;
+  for (a = 0; a < 3; a++)
+    store.tool_offset[a] = settings.tool_offset[a];
+  for (a = 0; a < 4; a++)
+    store.tmc_current[a] = settings.tmc_current[a];
+  store.tmc_stealth = settings.tmc_stealth;
 
   if ( ! flash_store_write(&store, sizeof(store), SETTINGS_VERSION))
     return 0;
@@ -399,43 +465,69 @@ static void load_v5(const settings_store_v5_t *v5) {
     settings.s_curve_us = v5->s_curve_us;
 }
 
+/// Version 6 part from the store.
+static void load_v6(const settings_store_v6_t *v6) {
+  load_v5(&v6->v5);
+  if (v6->pid_fan_ff <= 25500UL)
+    pid_set_fan_ff(v6->pid_fan_ff);
+  if (v6->skew_xy >= -100000L && v6->skew_xy <= 100000L)
+    settings.skew_xy = v6->skew_xy;
+  if (v6->backlash_z <= 5000UL)
+    settings.backlash_z = v6->backlash_z;
+  if (v6->backlash_f <= 1000UL)
+    settings.backlash_f = v6->backlash_f;
+  if (v6->retract_length <= 100000UL)
+    settings.retract_length = v6->retract_length;
+  if (v6->retract_feedrate >= 60 && v6->retract_feedrate <= 60000UL)
+    settings.retract_feedrate = v6->retract_feedrate;
+  if (v6->retract_zlift >= 0 && v6->retract_zlift <= 10000L)
+    settings.retract_zlift = v6->retract_zlift;
+  if (v6->recover_extra >= -100000L && v6->recover_extra <= 100000L)
+    settings.recover_extra = v6->recover_extra;
+  if (v6->recover_feedrate >= 60 && v6->recover_feedrate <= 60000UL)
+    settings.recover_feedrate = v6->recover_feedrate;
+  if (v6->host_timeout <= 3600UL)
+    settings.host_timeout = v6->host_timeout;
+  if (v6->host_lost_temp <= 300UL)
+    settings.host_lost_temp = v6->host_lost_temp;
+  if (v6->plr_enabled <= 1)
+    settings.plr_enabled = v6->plr_enabled;
+}
+
 uint8_t settings_load(void) {
   static settings_store_t store;
-  settings_store_v5_t *v5 = &store.v5;
-  settings_store_v4_t *v4 = &store.v5.v4;
-  settings_store_v3_t *v3 = &store.v5.v4.v3;
+  settings_store_v6_t *v6 = &store.v6;
+  settings_store_v5_t *v5 = &store.v6.v5;
+  settings_store_v4_t *v4 = &store.v6.v5.v4;
+  settings_store_v3_t *v3 = &store.v6.v5.v4.v3;
+  uint8_t a;
 
   if (flash_store_read(&store, sizeof(store), SETTINGS_VERSION)) {
-    load_v5(v5);
-    if (store.pid_fan_ff <= 25500UL)
-      pid_set_fan_ff(store.pid_fan_ff);
-    if (store.skew_xy >= -100000L && store.skew_xy <= 100000L)
-      settings.skew_xy = store.skew_xy;
-    if (store.backlash_z <= 5000UL)
-      settings.backlash_z = store.backlash_z;
-    if (store.backlash_f <= 1000UL)
-      settings.backlash_f = store.backlash_f;
-    if (store.retract_length <= 100000UL)
-      settings.retract_length = store.retract_length;
-    if (store.retract_feedrate >= 60 && store.retract_feedrate <= 60000UL)
-      settings.retract_feedrate = store.retract_feedrate;
-    if (store.retract_zlift >= 0 && store.retract_zlift <= 10000L)
-      settings.retract_zlift = store.retract_zlift;
-    if (store.recover_extra >= -100000L && store.recover_extra <= 100000L)
-      settings.recover_extra = store.recover_extra;
-    if (store.recover_feedrate >= 60 && store.recover_feedrate <= 60000UL)
-      settings.recover_feedrate = store.recover_feedrate;
-    if (store.host_timeout <= 3600UL)
-      settings.host_timeout = store.host_timeout;
-    if (store.host_lost_temp <= 300UL)
-      settings.host_lost_temp = store.host_lost_temp;
-    if (store.plr_enabled <= 1)
-      settings.plr_enabled = store.plr_enabled;
+    load_v6(v6);
+    if (store.backlash_x <= 5000UL)
+      settings.backlash_x = store.backlash_x;
+    if (store.backlash_y <= 5000UL)
+      settings.backlash_y = store.backlash_y;
+    if (store.backlash_s <= 100000UL)
+      settings.backlash_s = store.backlash_s;
+    for (a = 0; a < 3; a++)
+      if (store.tool_offset[a] >= -500000L && store.tool_offset[a] <= 500000L)
+        settings.tool_offset[a] = store.tool_offset[a];
+    for (a = 0; a < 4; a++)
+      if (store.tmc_current[a] >= 50 && store.tmc_current[a] <= 2500)
+        settings.tmc_current[a] = store.tmc_current[a];
+    if (store.tmc_stealth <= 0x0F)
+      settings.tmc_stealth = store.tmc_stealth;
     sersendf_P(("echo:Stored settings retrieved (%u bytes; crc %lu)\n"),
                (uint16_t)sizeof(store), flash_store_crc32(&store, sizeof(store)));
     return 1;
   }
 
+  if (flash_store_read(v6, sizeof(*v6), 6)) {
+    load_v6(v6);
+    report_old(v6, sizeof(*v6));
+    return 1;
+  }
   // Older records without the new fields? Take what's there, the new
   // fields keep their values.
   if (flash_store_read(v5, sizeof(*v5), 5)) {
@@ -637,9 +729,15 @@ void settings_report(void) {
     serial_writechar('\n');
   #endif
   #ifdef BACKLASH_COMPENSATION
-    serial_writestr("echo:; Backlash compensation: F<fraction> Z<mm>\n");
+    serial_writestr("echo:; Backlash compensation: F<fraction> S<smoothing mm> X<mm> Y<mm> Z<mm>\n");
     serial_writestr("echo:  M425 F");
     write_milli2((int32_t)s->backlash_f);
+    serial_writestr(" S");
+    write_milli2((int32_t)s->backlash_s);
+    serial_writestr(" X");
+    write_milli2((int32_t)s->backlash_x);
+    serial_writestr(" Y");
+    write_milli2((int32_t)s->backlash_y);
     serial_writestr(" Z");
     write_milli2((int32_t)s->backlash_z);
     serial_writechar('\n');
@@ -650,8 +748,24 @@ void settings_report(void) {
              (int32_t)(s->max_jerk[Y] * 50 / 3), (int32_t)(s->max_jerk[Z] * 50 / 3),
              (int32_t)(s->max_jerk[E] * 50 / 3), 1);
 
+  #ifdef TMC_UART
+    serial_writestr("echo:; Stepper driver current (mA), stealthChop:\n");
+    tmc_report_settings();
+  #endif
+
   serial_writestr("echo:; Home offset:\n");
   write_axes("M206", home_offset[X], home_offset[Y], home_offset[Z], 0, 0);
+
+  #if EXTRUDERS > 1
+    serial_writestr("echo:; Hotend offsets:\n");
+    serial_writestr("echo:  M218 T1 X");
+    write_milli2(s->tool_offset[X]);
+    serial_writestr(" Y");
+    write_milli2(s->tool_offset[Y]);
+    serial_writestr(" Z");
+    write_milli2(s->tool_offset[Z]);
+    serial_writechar('\n');
+  #endif
 
   #ifdef HEATER_EXTRUDER
     serial_writestr("echo:; Hotend PID:\n");
