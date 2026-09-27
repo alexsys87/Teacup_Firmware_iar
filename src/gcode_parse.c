@@ -148,6 +148,15 @@ uint8_t gcode_parse_char(uint8_t c) {
      ) {
     // Check if the field has ended. Either by a new field, space or EOL.
     if (last_field && (c < '0' || c > '9') && c != '.') {
+      // Every letter also as plain float (gcode_float()).
+      if (last_field >= 'A' && last_field <= 'Z') {
+        float v = (float)read_digit.mantissa;
+        uint8_t e;
+
+        for (e = read_digit.exponent; e > 1; e--)
+          v /= 10.f;
+        next_target.fval[last_field - 'A'] = read_digit.sign ? -v : v;
+      }
 			switch (last_field) {
 				case 'G':
 					next_target.G = read_digit.mantissa;
@@ -214,7 +223,7 @@ uint8_t gcode_parse_char(uint8_t c) {
 					if (next_target.seen_M &&
 					    (next_target.M == 593 || next_target.M == 301 ||
 					     next_target.M == 207 || next_target.M == 208 ||
-					     next_target.M == 425)) {
+					     next_target.M == 425 || next_target.M == 306)) {
 						next_target.F_milli = decfloat_to_int(&read_digit, 1000);
 						break;
 					}
@@ -315,6 +324,8 @@ uint8_t gcode_parse_char(uint8_t c) {
 		// new field?
 		if ((c >= 'A' && c <= 'Z') || c == '*') {
 			last_field = c;
+			if (c != '*')
+				next_target.seen_mask |= 1UL << (c - 'A');
       read_digit.sign = read_digit.mantissa = read_digit.exponent = 0;
 			if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
 				serial_writechar(c);
@@ -324,9 +335,11 @@ uint8_t gcode_parse_char(uint8_t c) {
     // Can't do ranges in switch..case, so process actual digits here.
     // Do it early, as there are many more digits than characters expected.
     if (c >= '0' && c <= '9') {
-      // M852 skew factors and M900 K take more decimals than lengths.
+      // M852 skew factors, M900 K and M306 model values take more
+      // decimals than lengths.
       uint8_t exp_max = (next_target.seen_M &&
-                         (next_target.M == 852 || next_target.M == 900)) ?
+                         (next_target.M == 852 || next_target.M == 900 ||
+                          next_target.M == 306)) ?
                         6 : DECFLOAT_EXP_MAX;
 
       if (read_digit.exponent < exp_max + 1 &&
@@ -490,6 +503,7 @@ uint8_t gcode_parse_char(uint8_t c) {
       next_target.seen_semi_comment = next_target.seen_parens_comment = \
       next_target.read_string = next_target.checksum_read = \
       next_target.checksum_calculated = 0;
+      next_target.seen_mask = 0;
       last_field = 0;
       read_digit.sign = read_digit.mantissa = read_digit.exponent = 0;
 

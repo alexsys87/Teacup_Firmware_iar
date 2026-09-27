@@ -47,6 +47,35 @@
 
 int32_t probe_offset[3];
 
+int32_t probe_twist_x(uint8_t i) {
+  if (TWIST_POINTS < 2)
+    return (int32_t)(X_TWIST_START * 1000.);
+  return (int32_t)(X_TWIST_START * 1000.) +
+         (int32_t)(((X_TWIST_END - X_TWIST_START) * 1000.) * i /
+                   (TWIST_POINTS - 1));
+}
+
+int32_t probe_twist(int32_t px) {
+  int32_t x0 = probe_twist_x(0), x1 = probe_twist_x(1);
+  int32_t dx = x1 - x0;
+  uint8_t i;
+  float f;
+
+  if (dx <= 0)
+    return settings.twist[0];
+  // Segment of px, the outer ones extrapolate.
+  if (px <= x0)
+    i = 0;
+  else {
+    i = (uint8_t)((px - x0) / dx);
+    if (i > TWIST_POINTS - 2)
+      i = TWIST_POINTS - 2;
+  }
+  f = (float)(px - probe_twist_x(i)) / (float)dx;
+  return settings.twist[i] +
+         (int32_t)lrintf(f * (float)(settings.twist[i + 1] - settings.twist[i]));
+}
+
 void probe_defaults(void) {
   probe_offset[X] = (int32_t)(Z_PROBE_OFFSET_X * 1000.);
   probe_offset[Y] = (int32_t)(Z_PROBE_OFFSET_Y * 1000.);
@@ -297,7 +326,7 @@ static uint8_t probe_point(int32_t px, int32_t py, int32_t *bed_z) {
   if ( ! probe_down((int32_t)(Z_PROBE_LOW_POINT * 1000.), &trigger))
     return 0;
   z = steps_to_um(trigger, Z);
-  *bed_z = z + probe_offset[Z];
+  *bed_z = z + probe_offset[Z] + probe_twist(px);
   probe_raise(z + (int32_t)(Z_PROBE_RETRACT * 1000.));
   return 1;
 }

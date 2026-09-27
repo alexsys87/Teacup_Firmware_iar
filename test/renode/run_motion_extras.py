@@ -145,7 +145,14 @@ mark('rt_report'); send('M208\n'); run('0.1')
 # ---- M86 host lost ----
 # Hotend at 200 C (thermistor ADC), X and Y homed for parking.
 HOT = c_to_adc(200.0)
-adc(HOT, ROOM); run('0.3')
+# The simulated temperature jumps from 25 to 200 C. With the heater off
+# (or its PID output at 0 from the derivative of that jump) this is what
+# the thermal protection calls "heater off but temperature rising" (stuck
+# MOSFET), one check period (20 s) later. So the heater runs at full power
+# during the jump (target 230, beyond PID_FUNCTIONAL_RANGE), then the
+# target is 200: the protection starts watching from 200 C.
+send('M104 S230\n'); run('0.1')
+adc(HOT, ROOM); run('0.5')
 send('M104 S200\n'); run('0.3')
 # The first G28 lifts Z from 1 to 5 mm first (Z_HOMING_HEIGHT, ~1.2 s).
 mark('hl_home')

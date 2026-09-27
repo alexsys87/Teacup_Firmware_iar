@@ -45,6 +45,8 @@
 #include "print_stats.h"
 #include "spindle.h"
 #include "tmc.h"
+#include "calibration.h"
+#include "mpc.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -356,7 +358,10 @@ void process_gcode_command(void) {
 				#ifdef SPINDLE_LASER
 					spindle_move_begin(0);        // Laser: G0 without power.
 				#endif
+				tower_z(next_target.target.axis[Z]);
+				dda_slowdown = (gcode_active & GCODE_SOURCE_SERIAL) ? 1 : 0;
 				bed_level_enqueue(&next_target.target);
+				dda_slowdown = 0;
 				#ifdef SPINDLE_LASER
 					spindle_move_end();
 				#endif
@@ -377,7 +382,12 @@ void process_gcode_command(void) {
 						spindle_set_inline(next_target.S);
 					spindle_move_begin(1);
 				#endif
+				tower_z(next_target.target.axis[Z]);
+				// Slowdown (M205 B) for host moves only: arcs and files fill the
+				// queue fast anyway.
+				dda_slowdown = (gcode_active & GCODE_SOURCE_SERIAL) ? 1 : 0;
 				bed_level_enqueue(&next_target.target);
+				dda_slowdown = 0;
 				#ifdef SPINDLE_LASER
 					spindle_move_end();
 				#endif
@@ -560,6 +570,49 @@ void process_gcode_command(void) {
 				}
 				sync_target_to_startpoint();
 				break;
+
+#ifdef BED_LEVELING
+      case 26:
+        //? --- G26: Mesh validation pattern ---
+        //?
+        //? Example: G26 H215 B60 L0.2 S0.4 P5
+        //?
+        //? Prints circles at the mesh points and lines between them, one
+        //? layer (like Marlin): shows whether the mesh and the Z offset give
+        //? an even first layer. H: hotend (default: current target or 205),
+        //? B: bed (current target or 60, B0 = don't heat), L: layer height
+        //? (0.2), S: nozzle size / line width (0.4), P: prime length (5 mm),
+        //? K: keep the heaters on afterwards. Needs XYZ homed and a mesh.
+        //?
+        {
+          cal_line_t ln;
+          uint16_t h = 205, b = 60;
+
+          #ifdef HEATER_EXTRUDER
+            if (temp_get_target(TEMP_SENSOR_extruder))
+              h = temp_get_target(TEMP_SENSOR_extruder) / 4;
+          #endif
+          #ifdef HEATER_BED
+            if (temp_get_target(TEMP_SENSOR_bed))
+              b = temp_get_target(TEMP_SENSOR_bed) / 4;
+          #endif
+          if (gcode_seen('H'))
+            h = (uint16_t)gcode_float('H');
+          if (gcode_seen('B'))
+            b = (uint16_t)gcode_float('B');
+          ln.layer = gcode_seen('L') ? (int32_t)lrintf(gcode_float('L') * 1000.f) : 200;
+          ln.width = gcode_seen('S') ? (int32_t)lrintf(gcode_float('S') * 1000.f) : 400;
+          if (ln.layer < 50 || ln.layer > 1000 || ln.width < 100 || ln.width > 2000) {
+            serial_writestr("echo:G26: bad L or S\n");
+            break;
+          }
+          cal_g26(h, b, &ln,
+                  gcode_seen('P') ? (int32_t)lrintf(gcode_float('P') * 1000.f) : 5000,
+                  gcode_seen('K'));
+          sync_target_to_startpoint();
+        }
+        break;
+#endif
 
 #ifdef Z_PROBE
       case 29:
@@ -1514,6 +1567,10 @@ void process_gcode_command(void) {
         //? Example: M203 X150 Y150 Z4 E25
         //? --- M205: Set jerk per axis, mm/s ---
         //? Example: M205 X20 Y20 Z0.4 E5
+        //? Example: M205 J0.013 B20000
+        //?
+        //? J: junction deviation in mm (0 = jerk X Y Z at corners), B: min.
+        //? segment time in us while the queue is less than half full.
         //?
         //? Marlin units. Without parameters: report (see M503). Changes are
         //? lost at reset unless stored with M500. Inch mode is not supported
@@ -1555,10 +1612,32 @@ void process_gcode_command(void) {
                 settings.max_jerk[a] = (uint32_t)v * 3 / 50;
             }
           }
+          if (next_target.M == 205) {
+            // J: junction deviation, mm (0 = classic jerk). B: min. segment
+            // time while the queue runs low, us.
+            if (next_target.seen_J) {
+              if (next_target.J_milli >= 0 && next_target.J_milli <= 1000)
+                settings.junction_dev = (uint32_t)next_target.J_milli;
+              else
+                serial_writestr("echo:M205 J out of range (0..1)\n");
+              any = 1;
+            }
+            if (gcode_seen('B')) {
+              float b = gcode_float('B');
+
+              if (b >= 0.f && b <= 1000000.f)
+                settings.min_segment_us = (uint32_t)b;
+              else
+                serial_writestr("echo:M205 B out of range (0..1000000)\n");
+              any = 1;
+            }
+          }
           if (any) {
             settings_apply();
-            if (next_target.M == 92)
+            if (next_target.M == 92) {
               dda_new_startpoint();   // Same position, new step count.
+              tmc_apply();            // Hybrid threshold depends on it.
+            }
           }
           else {
             settings_report();
@@ -1677,7 +1756,145 @@ void process_gcode_command(void) {
         break;
       #endif
 
+      #if defined LINEAR_ADVANCE && defined CAL_PATTERNS
+      case 9910:
+        //? --- M9910: Linear advance test pattern ---
+        //?
+        //? Example: M9910 A0 B0.1 C0.01
+        //?
+        //? One line per K from A to B in steps of C (s): 20 mm at W mm/s
+        //? (20), 40 mm at V mm/s (100), 20 mm slow again, 5 mm apart, the
+        //? first line in front. Take the K of the line with the most even
+        //? width at the speed changes, set it with M900 K. L: layer height
+        //? (0.2), S: line width (0.4). Heat the hotend first, needs XYZ
+        //? homed.
+        //?
+        {
+          cal_line_t ln;
+
+          ln.layer = gcode_seen('L') ? (int32_t)lrintf(gcode_float('L') * 1000.f) : 200;
+          ln.width = gcode_seen('S') ? (int32_t)lrintf(gcode_float('S') * 1000.f) : 400;
+          cal_la_pattern(
+            gcode_seen('A') ? (int32_t)lrintf(gcode_float('A') * 10000.f) : 0,
+            gcode_seen('B') ? (int32_t)lrintf(gcode_float('B') * 10000.f) : 1000,
+            gcode_seen('C') ? (int32_t)lrintf(gcode_float('C') * 10000.f) : 100,
+            (uint32_t)lrintf((gcode_seen('W') ? gcode_float('W') : 20.f) * 60.f),
+            (uint32_t)lrintf((gcode_seen('V') ? gcode_float('V') : 100.f) * 60.f),
+            &ln);
+          sync_target_to_startpoint();
+        }
+        break;
+      #endif
+
+      #if defined INPUT_SHAPING && defined CAL_PATTERNS
+      case 9911:
+        //? --- M9911: Input shaping test tower ---
+        //?
+        //? Example: M9911 A15 B80 H50
+        //?
+        //? Single wall square tower (50 mm), printed at V mm/s (100); the
+        //? shaper frequency of X and Y goes from A Hz (15) to B Hz (80) over
+        //? the height H mm (50), reported every 5 mm. The height with the
+        //? least ringing after the corners gives the frequency for M593 F
+        //? (X ringing on the walls along Y and vice versa). L: layer height
+        //? (0.2), S: line width (0.4). Heat the hotend first, needs XYZ
+        //? homed.
+        //?
+        {
+          cal_line_t ln;
+
+          ln.layer = gcode_seen('L') ? (int32_t)lrintf(gcode_float('L') * 1000.f) : 200;
+          ln.width = gcode_seen('S') ? (int32_t)lrintf(gcode_float('S') * 1000.f) : 400;
+          cal_is_tower(
+            (uint32_t)lrintf((gcode_seen('A') ? gcode_float('A') : 15.f) * 100.f),
+            (uint32_t)lrintf((gcode_seen('B') ? gcode_float('B') : 80.f) * 100.f),
+            (int32_t)lrintf((gcode_seen('H') ? gcode_float('H') : 50.f) * 1000.f),
+            (uint32_t)lrintf((gcode_seen('V') ? gcode_float('V') : 100.f) * 60.f),
+            &ln);
+          sync_target_to_startpoint();
+        }
+        break;
+      #endif
+
+      #ifdef HOTEND_MPC
+      case 306:
+        //? --- M306: Hotend model (MPC) ---
+        //?
+        //? Example: M306 P40                heater cartridge 40 W
+        //? Example: M306 T                  measure the model (autotune)
+        //? Example: M306 T S180             ... at 180 C instead of 200
+        //? Example: M306 P40 C16.7 R0.22 A0.068 F0.097 H0.0056
+        //?
+        //? Model predictive temperature control, like Marlin's MPCTEMP:
+        //? P heater power (W), C block heat capacity (J/K), R sensor
+        //? responsiveness (1/s), A heat loss (W/K), F heat loss with the
+        //? part fan at full speed (W/K), H filament heat capacity (J/K per
+        //? mm, 1.75 mm PLA 0.0056). T: cool down, heat up at full power,
+        //? hold the temperature with and without fan, set C R A F. M108
+        //? aborts. Stored with M500. Without parameters: report.
+        //?
+        if (next_target.seen_T) {
+          uint16_t t = 200;
+
+          if (next_target.seen_S && next_target.S >= 100 && next_target.S <= 300)
+            t = (uint16_t)next_target.S;
+          mpc_autotune(t);
+          break;
+        }
+        {
+          static const char letter[MPC_PARAMS] = { 'P', 'C', 'R', 'A', 'F', 'H' };
+          uint8_t i, any = 0;
+
+          for (i = 0; i < MPC_PARAMS; i++)
+            if (gcode_seen(letter[i])) {
+              float v = gcode_float(letter[i]);
+
+              if (v >= 0.f && v < 10000.f)
+                settings.mpc[i] = v;
+              else
+                serial_writestr("echo:M306 value out of range\n");
+              any = 1;
+            }
+          if ( ! any)
+            mpc_report();
+        }
+        break;
+      #endif
+
+      case 9912:
+        //? --- M9912: Tuning tower ---
+        //?
+        //? Example: M9912 P1 A0 B0.005     K = 0 + 0.005 * Z (mm)
+        //? Example: M9912 P4 A230 B-1 C5   hotend 230 C, 1 C less per mm,
+        //?                                  in 5 mm bands
+        //? Example: M9912 P0               off
+        //?
+        //? Print any tower model from the slicer; the parameter becomes A +
+        //? B * Z with each G0 / G1. P1: linear advance K (s), P2: input
+        //? shaping frequency X and Y (Hz), P3: junction deviation (mm), P4:
+        //? hotend temperature (C), P5: flow (%), P6: print acceleration
+        //? (mm/s^2). C: band, the value changes every C mm only (value of
+        //? the middle). Not stored, restore the setting afterwards (M501).
+        //? Without P: report.
+        //?
+        if (next_target.seen_P)
+          tower_set((uint8_t)next_target.P,
+                    gcode_seen('A') ? gcode_float('A') : 0.f,
+                    gcode_seen('B') ? gcode_float('B') : 0.f,
+                    gcode_seen('C') ? (int32_t)lrintf(gcode_float('C') * 1000.f) : 0);
+        tower_report();
+        break;
+
       #ifdef TMC_UART
+      case 913:
+        //? --- M913: TMC hybrid threshold ---
+        //?
+        //? Example: M913 X100 Y100 Z3 E30
+        //?
+        //? Axes in stealthChop (M569 S1) switch to spreadCycle above this
+        //? speed, mm/s: quiet when slow, full torque when fast. 0 =
+        //? stealthChop at all speeds. Stored with M500.
+        //?
       case 906:
         //? --- M906: TMC driver run current ---
         //?
@@ -1712,6 +1929,14 @@ void process_gcode_command(void) {
               else
                 serial_writestr("echo:M906 out of range (100..2000 mA)\n");
             }
+            else if (next_target.M == 913) {
+              int32_t mm_s = raw_axis[a] / 1000;
+
+              if (mm_s >= 0 && mm_s <= 1000)
+                settings.tmc_hybrid[a] = (uint32_t)mm_s;
+              else
+                serial_writestr("echo:M913 out of range (0..1000 mm/s)\n");
+            }
             else if (next_target.seen_S) {
               if (next_target.S)
                 settings.tmc_stealth |= 1UL << a;
@@ -1723,7 +1948,7 @@ void process_gcode_command(void) {
             settings.tmc_stealth = next_target.S ? 0x0F : 0;
             any = 1;
           }
-          if (any && (next_target.M == 906 || next_target.seen_S)) {
+          if (any && (next_target.M != 569 || next_target.seen_S)) {
             queue_wait();
             tmc_apply();
           }
@@ -1744,25 +1969,39 @@ void process_gcode_command(void) {
 
       #ifdef SKEW_CORRECTION
       case 852:
-        //? --- M852: XY skew correction ---
+        //? --- M852: Skew correction XY, XZ, YZ ---
         //?
         //? Example: M852 I-0.0012
+        //? Example: M852 I-0.0012 J0.0005 K0.0008
         //?
-        //? I (or S): skew factor, the tangent of the angle between the Y
-        //? axis and the perpendicular to X, like Marlin. Motor X = X - Y * I.
+        //? I (or S): XY skew factor, the tangent of the angle between the Y
+        //? axis and the perpendicular to X, J: XZ, K: YZ, like Marlin.
+        //? Motor Y = Y - Z * K, motor X = X - motor Y * I - Z * J.
         //? Range -0.1..0.1, 0 = off. The current position keeps its
         //? coordinates. Without parameters: report (see M503).
         //?
-        if (next_target.seen_I || next_target.seen_S) {
-          int32_t k = next_target.seen_I ? next_target.I_milli :
-                                           next_target.S * 1000000L;
+        if (next_target.seen_I || next_target.seen_S || next_target.seen_J ||
+            next_target.seen_K) {
+          int32_t k[3];
+          uint8_t n;
 
-          if (k < -100000L || k > 100000L) {
-            serial_writestr("echo:M852 I out of range (-0.1..0.1)\n");
+          k[0] = next_target.seen_I ? next_target.I_milli :
+                 next_target.seen_S ? next_target.S * 1000000L : settings.skew_xy;
+          k[1] = next_target.seen_J ? (int32_t)lrintf(gcode_float('J') * 1e6f) :
+                                      settings.skew_xz;
+          k[2] = next_target.seen_K ? (int32_t)lrintf(gcode_float('K') * 1e6f) :
+                                      settings.skew_yz;
+          for (n = 0; n < 3; n++)
+            if (k[n] < -100000L || k[n] > 100000L)
+              break;
+          if (n < 3) {
+            serial_writestr("echo:M852 out of range (-0.1..0.1)\n");
             break;
           }
           queue_wait();
-          settings.skew_xy = k;
+          settings.skew_xy = k[0];
+          settings.skew_xz = k[1];
+          settings.skew_yz = k[2];
           kinematics_update();
           {
             // Same place, new motor coordinates for X and Y (Z unchanged,
@@ -2331,6 +2570,46 @@ void process_gcode_command(void) {
                    probe_offset[X], probe_offset[Y], probe_offset[Z]);
         break;
 
+      case 423:
+        //? --- M423: X axis twist compensation ---
+        //?
+        //? Example: M423 X1 Z-0.04    point 1 gets -0.04 mm
+        //? Example: M423 R            all points 0
+        //?
+        //? Corrections of probe measurements at TWIST_POINTS places along
+        //? X (probe position X_TWIST_START..X_TWIST_END), linear in between:
+        //? Z of the nozzle touching minus the G30 result there. Takes
+        //? effect with the next G29 / G30 / G34. Without parameters:
+        //? report. Stored with M500.
+        //?
+        if (next_target.seen_R) {
+          uint8_t i;
+
+          for (i = 0; i < 7; i++)
+            settings.twist[i] = 0;
+        }
+        if (next_target.seen_X && next_target.seen_Z) {
+          int32_t i = raw_axis[X] / 1000;
+
+          restore_axis_word(X);
+          restore_axis_word(Z);
+          if (i < 0 || i >= TWIST_POINTS)
+            sersendf_P(("echo:M423 X is the point index, 0..%su\n"),
+                       (uint8_t)(TWIST_POINTS - 1));
+          else if (raw_axis[Z] < -5000L || raw_axis[Z] > 5000L)
+            serial_writestr("echo:M423 Z out of range (-5..5)\n");
+          else
+            settings.twist[i] = raw_axis[Z];
+        }
+        else if ( ! next_target.seen_R) {
+          uint8_t i;
+
+          for (i = 0; i < TWIST_POINTS; i++)
+            sersendf_P(("echo:  M423 X%su Z%lq ; at X%lq\n"), i,
+                       settings.twist[i], probe_twist_x(i));
+        }
+        break;
+
       case 401:
         //? --- M401: Deploy the probe ---
         probe_deploy();
@@ -2584,6 +2863,44 @@ void process_gcode_command(void) {
           break;
         // Scale 100% = 256
         next_target.target.f_multiplier = (next_target.S * 64 + 12) / 25;
+        break;
+
+      case 200:
+        //? --- M200: Filament diameter, volumetric extrusion and limit ---
+        //?
+        //? Example: M200 D1.75 L12     1.75 mm filament, max. 12 mm^3/s
+        //? Example: M200 S1            E values in mm^3 (S0: mm)
+        //?
+        //? D: filament diameter, mm; D0 switches volumetric E off, D > 0 on
+        //? (Marlin). L: max. volumetric speed, mm^3/s, printing moves get
+        //? slower above it (0 = off). Without parameters: report. Stored
+        //? with M500.
+        //?
+        if (next_target.seen_D || next_target.seen_S) {
+          queue_wait();
+          if (next_target.seen_D) {
+            if (next_target.D_milli == 0)
+              settings.vol_enabled = 0;
+            else if (next_target.D_milli >= 500 && next_target.D_milli <= 5000) {
+              settings.filament_dia = (uint32_t)next_target.D_milli;
+              settings.vol_enabled = 1;
+            }
+            else
+              serial_writestr("echo:M200 D out of range (0.5..5)\n");
+          }
+          if (next_target.seen_S)
+            settings.vol_enabled = next_target.S ? 1 : 0;
+          dda_new_startpoint();             // E steps in the new unit.
+        }
+        if (next_target.seen_L) {
+          if (next_target.L_milli >= 0 && next_target.L_milli <= 1000000L)
+            settings.vol_limit = (uint32_t)next_target.L_milli;
+          else
+            serial_writestr("echo:M200 L out of range (0..1000)\n");
+        }
+        if ( ! next_target.seen_D && ! next_target.seen_S && ! next_target.seen_L)
+          sersendf_P(("echo:  M200 S%lu D%lq L%lq\n"), settings.vol_enabled,
+                     settings.filament_dia, settings.vol_limit);
         break;
 
       case 221:

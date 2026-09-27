@@ -39,6 +39,16 @@ typedef struct {
   int32_t       tool_offset[3]; ///< M218 T1 X Y Z, offset of tool 1, um.
   uint32_t      tmc_current[4]; ///< M906 X Y Z E, run current, mA.
   uint32_t      tmc_stealth;    ///< M569 S, stealthChop per axis, bits X..E.
+  uint32_t      junction_dev;   ///< M205 J, junction deviation, um, 0 = jerk.
+  uint32_t      min_segment_us; ///< M205 B, min. segment time (queue low), us.
+  uint32_t      filament_dia;   ///< M200 D, filament diameter, um.
+  uint32_t      vol_enabled;    ///< M200 S1: E values are mm^3.
+  uint32_t      vol_limit;      ///< M200 L, max. volumetric speed, mm^3/s / 1000, 0 = off.
+  uint32_t      tmc_hybrid[4];  ///< M913, stealthChop up to mm/s, 0 = always.
+  float         mpc[6];         ///< M306 P C R A F H, see heater.h.
+  int32_t       skew_xz;        ///< M852 J, XZ skew factor, millionths.
+  int32_t       skew_yz;        ///< M852 K, YZ skew factor, millionths.
+  int32_t       twist[7];       ///< M423, probe Z correction along X, um.
 } settings_t;
 
 /// Motion settings, read directly by the motion code.

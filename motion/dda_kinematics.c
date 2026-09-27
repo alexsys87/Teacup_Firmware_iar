@@ -12,23 +12,48 @@
 
 #ifdef SKEW_CORRECTION
 /**
-  XY skew factor (M852 I), tangent of the angle by which the Y axis leans
-  towards X. Motor X = X - Y * factor, like Marlin's SKEW_CORRECTION.
+  Skew factors (M852 I J K), tangents of the angles by which the axes lean,
+  like Marlin's SKEW_CORRECTION:
+    motor Y = Y - Z * yz
+    motor X = X - motor Y * xy - Z * xz
+  Linear, so straight moves stay straight.
 */
-float skew_xy_factor;
+float skew_xy_factor, skew_xz_factor, skew_yz_factor;
 
 void kinematics_update(void) {
   skew_xy_factor = (float)settings.skew_xy * 1e-6f;
+  skew_xz_factor = (float)settings.skew_xz * 1e-6f;
+  skew_yz_factor = (float)settings.skew_yz * 1e-6f;
+}
+
+/// Y with the skew correction, um.
+static int32_t skew_y(const axes_int32_t um) {
+  if (skew_yz_factor == 0.f)
+    return um[Y];
+  return um[Y] - (int32_t)lrintf((float)um[Z] * skew_yz_factor);
 }
 
 /// X with the skew correction, um.
 static int32_t skew_x(const axes_int32_t um) {
-  if (skew_xy_factor == 0.f)
+  if (skew_xy_factor == 0.f && skew_xz_factor == 0.f)
     return um[X];
-  return um[X] - (int32_t)lrintf((float)um[Y] * skew_xy_factor);
+  return um[X] - (int32_t)lrintf((float)skew_y(um) * skew_xy_factor +
+                                 (float)um[Z] * skew_xz_factor);
+}
+
+/// Motor deltas of X and Y back to G-code deltas.
+static void unskew(axes_int32_t delta) {
+  int32_t y_motor = delta[Y];
+
+  if (skew_yz_factor != 0.f)
+    delta[Y] += (int32_t)lrintf((float)delta[Z] * skew_yz_factor);
+  if (skew_xy_factor != 0.f || skew_xz_factor != 0.f)
+    delta[X] += (int32_t)lrintf((float)y_motor * skew_xy_factor +
+                                (float)delta[Z] * skew_xz_factor);
 }
 #else
   #define skew_x(um) ((um)[X])
+  #define skew_y(um) ((um)[Y])
 
 void kinematics_update(void) {
 }
@@ -58,23 +83,21 @@ carthesian_to_corexy(const TARGET *startpoint, const TARGET *target,
 
 void axes_um_to_steps_cartesian(const axes_int32_t um, axes_int32_t steps) {
   steps[X] = um_to_steps(skew_x(um), X);
-  steps[Y] = um_to_steps(um[Y], Y);
+  steps[Y] = um_to_steps(skew_y(um), Y);
   steps[Z] = um_to_steps(um[Z] + bed_level_offset(um), Z);
 }
 
 void axes_um_to_steps_corexy(const axes_int32_t um, axes_int32_t steps) {
-  int32_t x = skew_x(um);
+  int32_t x = skew_x(um), y = skew_y(um);
 
-  steps[X] = um_to_steps(x + um[Y], X);
-  steps[Y] = um_to_steps(x - um[Y], Y);
+  steps[X] = um_to_steps(x + y, X);
+  steps[Y] = um_to_steps(x - y, Y);
   steps[Z] = um_to_steps(um[Z] + bed_level_offset(um), Z);
 }
 
 void delta_to_axes_cartesian(axes_int32_t delta) {
   #ifdef SKEW_CORRECTION
-    // Motor X delta back to X: X = motor X + Y * factor.
-    if (skew_xy_factor != 0.f)
-      delta[X] += (int32_t)lrintf((float)delta[Y] * skew_xy_factor);
+    unskew(delta);
   #else
     (void)delta;
   #endif
@@ -88,7 +111,6 @@ void delta_to_axes_corexy(axes_int32_t delta) {
   delta[X] = x_axis;
   delta[Y] = y_axis;
   #ifdef SKEW_CORRECTION
-    if (skew_xy_factor != 0.f)
-      delta[X] += (int32_t)lrintf((float)delta[Y] * skew_xy_factor);
+    unskew(delta);
   #endif
 }

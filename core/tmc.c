@@ -15,7 +15,7 @@
                 from TMC_RSENSE, vsense for low currents
     CHOPCONF    TOFF 3, HSTRT 1, HEND -1, TBL 24 clocks, MRES, interpolation
     PWMCONF     stealthChop with automatic tuning (Marlin's defaults)
-    TPWMTHRS 0  stealthChop at all speeds (if selected), TPOWERDOWN 128
+    TPWMTHRS    spreadCycle above the hybrid threshold (M913), TPOWERDOWN 128
   Writes are verified with the transmission counter IFCNT.
 
   Without motor supply the drivers don't answer and forget everything.
@@ -234,6 +234,24 @@ static uint8_t microsteps_to_mres(uint16_t ms) {
   return mres;
 }
 
+/**
+  Hybrid threshold (M913, Marlin HYBRID_THRESHOLD): stealthChop below the
+  speed settings.tmc_hybrid (mm/s), spreadCycle above it. TPWMTHRS is the
+  time between two 1/256 microsteps at that speed, in 1 / 12 MHz (TMC2209
+  clock): 12.65 MHz * microsteps / (256 * speed * steps per mm), as in
+  Marlin. 0 = stealthChop at all speeds.
+*/
+static uint32_t tpwmthrs(const tmc_cfg_t *c) {
+  uint32_t mm_s = settings.tmc_hybrid[c->axis];
+  float t;
+
+  if ( ! mm_s)
+    return 0;
+  t = 12650000.f * (float)c->microsteps /
+      (256.f * (float)mm_s * (float)settings.steps_per_m[c->axis] * 0.001f);
+  return (t > 1048575.f) ? 1048575UL : (uint32_t)t;
+}
+
 /// Write the whole configuration of driver i. \return new tmc_state.
 static uint8_t tmc_configure(uint8_t i) {
   const tmc_cfg_t *c = &tmc_cfg[i];
@@ -265,7 +283,7 @@ static uint8_t tmc_configure(uint8_t i) {
   tmc_write(c->addr, REG_TPOWERDOWN, 128);
   tmc_write(c->addr, REG_CHOPCONF, chopconf);
   tmc_write(c->addr, REG_PWMCONF, PWMCONF_VALUE);
-  tmc_write(c->addr, REG_TPWMTHRS, 0);
+  tmc_write(c->addr, REG_TPWMTHRS, tpwmthrs(c));
 
   if ( ! tmc_read(c->addr, REG_IFCNT, &after))
     return TMC_NONE;
@@ -350,6 +368,10 @@ void tmc_report_settings(void) {
   for (i = 0; i < TMC_COUNT; i++)
     sersendf_P((" %c%lu"), axis_char[tmc_cfg[i].axis],
                settings.tmc_current[tmc_cfg[i].axis]);
+  serial_writestr("\necho:  M913");
+  for (i = 0; i < TMC_COUNT; i++)
+    sersendf_P((" %c%lu"), axis_char[tmc_cfg[i].axis],
+               settings.tmc_hybrid[tmc_cfg[i].axis]);
   serial_writechar('\n');
   for (any = 0; any < 2; any++) {
     uint8_t n = 0;
@@ -388,7 +410,7 @@ void tmc_report(void) {
 
   for (i = 0; i < TMC_COUNT; i++) {
     const tmc_cfg_t *c = &tmc_cfg[i];
-    uint32_t ioin, gconf, ihold_irun, chopconf, drv, gstat;
+    uint32_t ioin, gconf, ihold_irun, chopconf, drv, gstat, tpwmthrs_reg;
     uint8_t cs, vsense, k;
 
     sersendf_P(("echo:TMC %c (address %su): "), axis_char[c->axis], c->addr);
@@ -397,7 +419,8 @@ void tmc_report(void) {
          ! tmc_read(c->addr, REG_IHOLD_IRUN, &ihold_irun) ||
          ! tmc_read(c->addr, REG_CHOPCONF, &chopconf) ||
          ! tmc_read(c->addr, REG_DRV_STATUS, &drv) ||
-         ! tmc_read(c->addr, REG_GSTAT, &gstat)) {
+         ! tmc_read(c->addr, REG_GSTAT, &gstat) ||
+         ! tmc_read(c->addr, REG_TPWMTHRS, &tpwmthrs_reg)) {
       serial_writestr("not responding\n");
       continue;
     }
@@ -408,8 +431,10 @@ void tmc_report(void) {
     sersendf_P((", %lu mA (IRUN %su, IHOLD %su), 1/%u, "),
                cs_to_current(cs, vsense), cs, (uint8_t)(ihold_irun & 0x1FU),
                (uint16_t)(256U >> ((chopconf >> 24) & 0x0FU)));
-    serial_writestr((gconf & GCONF_EN_SPREADCYCLE) ? "spreadCycle\n"
-                                                   : "stealthChop\n");
+    serial_writestr((gconf & GCONF_EN_SPREADCYCLE) ? "spreadCycle" : "stealthChop");
+    if ( ! (gconf & GCONF_EN_SPREADCYCLE) && tpwmthrs_reg)
+      sersendf_P((" up to %lu mm/s"), settings.tmc_hybrid[c->axis]);
+    serial_writechar('\n');
     sersendf_P(("echo:  CS_ACTUAL %su, "), (uint8_t)((drv >> 16) & 0x1FU));
     serial_writestr((drv & (1UL << 31)) ? "standstill" : "moving");
     for (k = 0; k < sizeof(flags) / sizeof(flags[0]); k++)
