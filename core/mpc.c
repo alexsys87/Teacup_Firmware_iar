@@ -240,6 +240,11 @@ static float tune_hold(float target, uint32_t settle, uint32_t measure) {
       return -1.f;
     out = mpc_run(hotend(), target);
     heater_set(HEATER_EXTRUDER, out);
+    if (t % 100 == 99) {
+      serial_writestr("echo:MPC autotune: ");
+      write_float(hotend(), 1);
+      sersendf_P((" C, out %su\n"), out);
+    }
     if (t >= settle * 10) {
       sum += (float)out;
       n++;
@@ -353,6 +358,15 @@ void mpc_autotune(uint16_t target) {
   settings.mpc[MPC_C] = c_new;
   settings.mpc[MPC_R] = r_new;
   settings.mpc[MPC_A] = settings.mpc[MPC_F] = a_new;
+  serial_writestr("echo:MPC autotune: asymptote ");
+  write_float(asymp, 1);
+  serial_writestr(" C, C");
+  write_float(c_new, 2);
+  serial_writestr(" R");
+  write_float(r_new, 4);
+  serial_writestr(" A");
+  write_float(a_new, 4);
+  serial_writechar('\n');
 
   // 3. Hold the target: losses without and with the fan.
   serial_writestr("echo:MPC autotune: measuring heat loss\n");
