@@ -233,8 +233,9 @@
     SD card CS            PC_14  SPI1 shared with the SPI flash; PC14 is
                                  the 32.768 kHz crystal: remove it (the
                                  firmware doesn't use the LSE)
-    spare                 PC_15  SD detect, or Z2_STEP (Z_STEPPER_ALIGN
-                                 above, same crystal removal)
+    spare                 PC_15  SD detect, Z2_STEP (Z_STEPPER_ALIGN
+                                 above) or MAX31865 CS (HOTEND_MAX31865
+                                 below), same crystal removal
     display               I2C1   PB6/PB7 (SSD1306 or HD44780 + PCF8574)
     encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27,
     beeper                       P0..P5 (P6 / P7: fans, see PCF8574_ADDRESS)
@@ -304,8 +305,41 @@
 //                name       pullup  t1    r1        t2     r2       t3     r3
 DEFINE_THERMISTOR(epcos100k, 4700.0, 25.0, 100000.0, 150.0, 1641.9,  250.0, 226.15)
 
+/** \def HOTEND_MAX31865 MAX31865_CS_PIN MAX31865_WIRES MAX31865_RREF MAX31865_R0 MAX31865_50HZ
+  Hotend with a PT100 (or PT1000) through a MAX31865 board instead of the
+  thermistor: for 300+ C (all-metal hotends, PEEK, PC, nylon), where a
+  100k thermistor gets inaccurate, and exact without calibration.
+
+  The MAX31865 is on SPI1 (PA5 SCK, PA6 MISO -> SDO, PA7 MOSI -> SDI),
+  shared with the SPI flash, chip select MAX31865_CS_PIN. All pins are
+  taken: PC15 (remove the 32.768 kHz crystal; not together with
+  Z_STEPPER_ALIGN, which takes PC15, then use PC14 without SD card).
+  Supply the board with 3.3 V.
+
+  MAX31865_WIRES: 2, 3 or 4 wire sensor, set the jumpers / solder bridges
+  of the board to match. MAX31865_RREF: reference resistor of the board,
+  Ohm (Adafruit, most clones: 430 for PT100, 4300 for PT1000).
+  MAX31865_R0: 100 = PT100, 1000 = PT1000. MAX31865_50HZ: mains filter
+  50 Hz (else 60 Hz). An open or shorted sensor is a fault: no reading,
+  the thermal protection halts the printer.
+*/
+//#define HOTEND_MAX31865
+#define MAX31865_CS_PIN          PC_15
+#define MAX31865_WIRES           2
+#define MAX31865_RREF            430.0
+#define MAX31865_R0              100.0
+#define MAX31865_50HZ
+
+#ifdef HOTEND_MAX31865
+  #define TEMP_MAX31865
+#endif
+
 //                 name      type           pin    additional
+#ifdef HOTEND_MAX31865
+DEFINE_TEMP_SENSOR(extruder, TT_MAX31865,   MAX31865_CS_PIN, MAX31865_WIRES)  // PT100
+#else
 DEFINE_TEMP_SENSOR(extruder, TT_THERMISTOR, PA_1,  THERMISTOR_epcos100k)  // T0 (A13)
+#endif
 DEFINE_TEMP_SENSOR(bed,      TT_THERMISTOR, PB_1,  THERMISTOR_epcos100k)  // T1 (A14)
 
 /***************************************************************************\

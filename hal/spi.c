@@ -1,5 +1,6 @@
 /** \file
-  \brief SPI master for STM32F4, polled, 8 bit, mode 0.
+  \brief SPI master for STM32F4, polled, 8 bit, mode 0 (spi_mode() switches
+  for one device, e.g. MAX31865 in mode 1).
 */
 
 #include "spi.h"
@@ -82,6 +83,16 @@ static void spi_set_br(uint32_t br) {
     ;
   SPIx->CR1 &= ~SPI_CR1_SPE;
   SPIx->CR1 = (SPIx->CR1 & ~SPI_CR1_BR) | br;
+  SPIx->CR1 |= SPI_CR1_SPE;
+}
+
+void spi_mode(uint8_t mode) {
+  uint32_t bits = ((mode & 2) ? SPI_CR1_CPOL : 0) | ((mode & 1) ? SPI_CR1_CPHA : 0);
+
+  while (SPIx->SR & SPI_SR_BSY)
+    ;
+  SPIx->CR1 &= ~SPI_CR1_SPE;
+  SPIx->CR1 = (SPIx->CR1 & ~(SPI_CR1_CPOL | SPI_CR1_CPHA)) | bits;
   SPIx->CR1 |= SPI_CR1_SPE;
 }
 

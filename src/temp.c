@@ -19,7 +19,7 @@
 #include "pinio.h"
 #include "thermal_protection.h"
 
-#ifdef	TEMP_MAX6675
+#if defined TEMP_MAX6675 || defined TEMP_MAX31865
   #include "spi.h"
 #endif
 
@@ -32,6 +32,10 @@
 #if defined TEMP_THERMISTOR || defined TEMP_MCP3008
   #include <math.h>
   static void thermistor_init(void);
+#endif
+#ifdef TEMP_MAX31865
+  #include <math.h>
+  static void max31865_init(uint8_t pin_id, uint8_t wires);
 #endif
 
 /// holds metadata for each temperature sensor
@@ -137,6 +141,14 @@ void temp_init(void) {
       #ifdef TEMP_MCP3008
         case TT_MCP3008:
           // Chip select is set up in spi_init().
+          break;
+      #endif
+
+      #ifdef TEMP_MAX31865
+        case TT_MAX31865:
+          spi_deselect_id(temp_sensors[i].pin_id);
+          pin_id_output(temp_sensors[i].pin_id);
+          max31865_init(temp_sensors[i].pin_id, temp_sensors[i].additional);
           break;
       #endif
 
@@ -293,6 +305,129 @@ static uint16_t temp_read_max6675(temp_sensor_t i) {
   return TEMP_NOT_READY;
 }
 #endif /* TEMP_MAX6675 */
+
+#ifdef TEMP_MAX31865
+/**
+  MAX31865 RTD to digital converter (PT100 / PT1000), SPI mode 1.
+
+  Registers: 0x00 configuration, 0x01/0x02 RTD value (15 bit, bit 0 of
+  the LSB = fault), 0x07 fault status; write access with address bit 7.
+  Configuration: bias on, automatic conversion (one every 20 ms), 3 wire
+  or 2/4 wire, 50 or 60 Hz filter.
+
+  Temperature from the resistance with the Callendar-Van Dusen equation
+  (IEC 60751), R = R0 * (1 + A*T + B*T^2) for T >= 0, solved for T; below
+  0 C a polynomial fit (T of the extruder never gets there, but the room
+  may be cold).
+*/
+#ifndef MAX31865_RREF
+  #define MAX31865_RREF   430.0
+#endif
+#ifndef MAX31865_R0
+  #define MAX31865_R0     100.0
+#endif
+
+// The chip select must not share a pin with another function.
+#ifdef MAX31865_CS_PIN
+  #if defined Z2_STEP_PIN && PIN_ID(MAX31865_CS_PIN) == PIN_ID(Z2_STEP_PIN)
+    #error MAX31865_CS_PIN is Z2_STEP_PIN (Z_STEPPER_ALIGN), move it (PC_14 without SD card).
+  #endif
+  #if defined SD_CARD_SELECT_PIN && \
+      PIN_ID(MAX31865_CS_PIN) == PIN_ID(SD_CARD_SELECT_PIN)
+    #error MAX31865_CS_PIN is SD_CARD_SELECT_PIN.
+  #endif
+#endif
+
+#define MAX31865_CONFIG_BIAS    0x80
+#define MAX31865_CONFIG_AUTO    0x40
+#define MAX31865_CONFIG_3WIRE   0x10
+#define MAX31865_CONFIG_CLEAR   0x02
+#define MAX31865_CONFIG_50HZ    0x01
+
+static uint8_t max31865_config(uint8_t wires) {
+  uint8_t c = MAX31865_CONFIG_BIAS | MAX31865_CONFIG_AUTO;
+
+  if (wires == 3)
+    c |= MAX31865_CONFIG_3WIRE;
+  #ifdef MAX31865_50HZ
+    c |= MAX31865_CONFIG_50HZ;
+  #endif
+  return c;
+}
+
+/// Write one register.
+static void max31865_write(uint8_t pin_id, uint8_t reg, uint8_t value) {
+  spi_mode(1);
+  spi_speed_100_400();
+  spi_select_id(pin_id);
+  spi_rw(0x80 | reg);
+  spi_rw(value);
+  spi_deselect_id(pin_id);
+  spi_mode(0);
+}
+
+static void max31865_init(uint8_t pin_id, uint8_t wires) {
+  max31865_write(pin_id, 0x00, max31865_config(wires) | MAX31865_CONFIG_CLEAR);
+}
+
+/// Resistance (Ohm) to temperature (C).
+static float pt_temperature(float r) {
+  const float a = 3.9083e-3f, b = -5.775e-7f;
+  float t, rp;
+
+  t = (-a + sqrtf(a * a - 4.0f * b * (1.0f - r / (float)MAX31865_R0))) /
+      (2.0f * b);
+  if (t >= 0.0f)
+    return t;
+  // Below 0 C: fit on the resistance normalised to 100 Ohm.
+  rp = r * (100.0f / (float)MAX31865_R0);
+  return -242.02f + rp * (2.2228f + rp * (2.5859e-3f + rp * (-4.8260e-6f +
+         rp * (-2.8183e-8f + rp * 1.5243e-10f))));
+}
+
+static uint16_t temp_read_max31865(temp_sensor_t i) {
+  uint8_t id = temp_sensors[i].pin_id;
+  uint16_t code;
+  float r, t;
+
+  // A new conversion every 20 ms; read every 100 ms (the PID rate).
+  if (temp_sensors_runtime[i].active++ != 1) {
+    if (temp_sensors_runtime[i].active > 10)
+      temp_sensors_runtime[i].active = 0;
+    return TEMP_NOT_READY;
+  }
+
+  spi_mode(1);
+  spi_speed_100_400();
+  spi_select_id(id);
+  spi_rw(0x01);                               // Read from the RTD MSB.
+  code = (uint16_t)spi_rw(0) << 8;
+  code |= spi_rw(0);
+  spi_deselect_id(id);
+  spi_mode(0);
+
+  if (code & 1) {
+    // Fault (open or shorted sensor, wiring): no reading, clear it and try
+    // again. Missing readings for long make the thermal protection halt.
+    if (DEBUG_PID && (debug_flags & DEBUG_PID))
+      sersendf_P(("MAX31865 %su fault\n"), i);
+    max31865_write(id, 0x00,
+                   max31865_config(temp_sensors[i].additional) |
+                   MAX31865_CONFIG_CLEAR);
+    return TEMP_NOT_READY;
+  }
+
+  r = (float)(code >> 1) * (float)MAX31865_RREF / 32768.0f;
+  t = pt_temperature(r);
+  conv_c = t;
+  conv_c_set = 1;
+  if (t <= 0.0f)
+    return 0;
+  if (t >= 16383.0f)
+    return 0xFFF0;
+  return (uint16_t)(t * 4.0f + 0.5f);
+}
+#endif /* TEMP_MAX31865 */
 
 #ifdef TEMP_THERMISTOR
 static uint16_t temp_read_thermistor(temp_sensor_t i) {
@@ -477,6 +612,11 @@ static uint16_t temp_read_dummy(temp_sensor_t i) {
 
 static uint16_t read_temp_sensor(temp_sensor_t i) {
   switch (temp_sensors[i].temp_type) {
+    #ifdef TEMP_MAX31865
+      case TT_MAX31865:
+        return temp_read_max31865(i);
+    #endif
+
     #ifdef TEMP_MAX6675
       case TT_MAX6675:
         return temp_read_max6675(i);

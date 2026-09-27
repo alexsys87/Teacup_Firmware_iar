@@ -1,5 +1,5 @@
 /** \file
-  \brief SPI subsystem for SD card, MAX6675 and MCP3008.
+  \brief SPI subsystem for SD card, SPI flash, MAX6675, MAX31865 and MCP3008.
 
   Other than serial, SPI has to deal with multiple devices. Device selection
   happens before reading and writing, data exchange itself is the same for
@@ -26,6 +26,14 @@ void spi_speed_100_400(void);
 /// Clock about 10 MHz.
 void spi_speed_max(void);
 
+/**
+  SPI mode 0..3 (CPOL << 1 | CPHA), only with all chip selects high. Mode
+  0 is the default of the bus; a device needing another one switches
+  before and back after its transfer (MAX31865: mode 1, same idle clock
+  level as mode 0).
+*/
+void spi_mode(uint8_t mode);
+
 #ifdef SD_CARD_SELECT_PIN
 TEACUP_INLINE void spi_select_sd(void) {
   WRITE(SD_CARD_SELECT_PIN, 0);
@@ -49,7 +57,7 @@ TEACUP_INLINE void spi_deselect_mcp3008(void) {
 }
 #endif /* TEMP_MCP3008 */
 
-/// Select a device by its PIN_ID() chip select (e.g. MAX6675).
+/// Select a device by its PIN_ID() chip select (e.g. MAX6675, MAX31865).
 TEACUP_INLINE void spi_select_id(uint8_t id) {
   pin_id_write(id, 0);
 }
