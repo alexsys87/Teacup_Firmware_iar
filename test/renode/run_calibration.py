@@ -93,7 +93,7 @@ for j in range(3):
 send('M420 S1\n'); run('0.3')
 PTS_XY = [(40.0, 40.0), (62.5, 90.0), (110.0, 52.5), (150.0, 140.0), (46.667, 15.0), (205.0, 165.0), (5.0, 5.0)]
 for k, (x, y) in enumerate(PTS_XY):
-    mark('sub%d' % k); send('G1 X%.3f Y%.3f Z5 F6000\nM400\nM114\n' % (x, y)); run('1.5')
+    mark('sub%d' % k); send('G1 X%.3f Y%.3f Z5 F6000\nM400\nM114\n' % (x, y)); run('3.0')
     cmd('echo "@@ZSTEPS %d"' % k); cmd('sysbus ReadDoubleWord 0x%08X' % (SP_STEPS + 8))
 send('M420 S0\n'); run('0.2')
 
@@ -108,7 +108,8 @@ cmd('sysbus LogPeripheralAccess sysbus.timer3 true')
 mark('g26_after'); send('M114\nM420\n'); run('0.3')
 
 # 4. M9910: 3 lines.
-send('G92 X100 Y100 Z5 E0\nM900 K0.05\n'); run('0.1')
+# G26 switched the heaters off at the end (no K).
+send('G92 X100 Y100 Z5 E0\nM900 K0.05\nM104 S200\n'); run('0.5')
 mark('la'); send('M9910 A0 B0.02 C0.01\n'); run('12.0')
 mark('la_after'); send('M114\nM900\n'); run('0.3')
 
