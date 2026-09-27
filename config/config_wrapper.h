@@ -130,7 +130,7 @@
 /**
   Check wether we need SPI.
 */
-#if defined SD_CARD_SELECT_PIN || defined TEMP_MAX6675 || \
+#if defined SD_CARD_SELECT_PIN || defined TEMP_MAX6675 || defined TEMP_MAX31865 || \
     defined TEMP_MCP3008 || defined SPI_FLASH
   #define SPI
 #endif
