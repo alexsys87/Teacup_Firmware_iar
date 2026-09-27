@@ -52,6 +52,13 @@ void spi_init(void) {
   SET_AF(SPI_MOSI_PIN, SPI_AF);
   PULLUP_ON(SPI_MISO_PIN);
 
+  // All chip selects high before any transfer: devices on the shared bus
+  // are set up one after the other (MAX31865 in temp_init() before the
+  // flash probe), an undriven chip select would take part.
+  #ifdef SPI_FLASH
+    WRITE(SPI_FLASH_CS_PIN, 1);
+    SET_OUTPUT(SPI_FLASH_CS_PIN);
+  #endif
   #ifdef SD_CARD_SELECT_PIN
     WRITE(SD_CARD_SELECT_PIN, 1);
     SET_OUTPUT(SD_CARD_SELECT_PIN);

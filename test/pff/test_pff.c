@@ -25,6 +25,14 @@ int main(int argc, char **argv) {
   { long off = 123457; FRESULT s = pf_lseek((DWORD)off); fseek(ref, off, SEEK_SET);
     len = 0; pf_parse_line(parser); fgets(want, sizeof want, ref); want[strcspn(want, "\n")] = 0;
     printf("lseek %d, partial line ok: %d\n", s, strcmp(want, line) == 0); if (strcmp(want, line)) bad++; }
+  /* CR LF, empty lines skipped, last line without EOL, nothing after the
+     end of the file (junk of JUNK.GCO in the rest of the sector). */
+  { static const char *exp[] = { "G1 X1", "G1 X2", "   ", "M114" }; int k = 0;
+    if ((r = pf_open("TAIL.GCO"))) { printf("open tail %d\n", r); return 1; }
+    for (;;) { len = 0; r = pf_parse_line(parser); if (r) break;
+      if (k >= 4 || strcmp(line, exp[k])) { printf("tail line %d: '%s'\n", k, line); bad++; } k++; }
+    printf("tail: lines %d (4), end %s\n", k, r == FR_END_OF_FILE ? "FR_END_OF_FILE" : "?");
+    if (k != 4 || r != FR_END_OF_FILE) bad++; }
   pf_unmount(&fs);
   printf("files %d, lines %d, mismatches %d, end %s\n", files, lines, bad, r == FR_END_OF_FILE ? "FR_END_OF_FILE" : "?");
   return bad != 0;

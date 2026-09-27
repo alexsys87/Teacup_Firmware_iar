@@ -92,6 +92,9 @@ namespace Antmicro.Renode.Peripherals.SPI
             writeEnabled = false;
         }
 
+        // Chip select state, for the bus model (TeacupSPIMux).
+        public bool Selected => selected;
+
         private void FinishCommand()
         {
             switch(command)

@@ -27,7 +27,7 @@
     PA14  SWCLK                    PB15  Z_MIN / Z probe (EXTI15)
     PA15  Y_STEP       (TIM2_CH1)  PC13  BLTouch servo (LED on the pin)
                                    PC14  SD card CS (*, remove 32 kHz xtal)
-                                   PC15  spare (*, SD detect / Z2_STEP, G34)
+                                   PC15  spare (*, Z2_STEP for G34 / MAX31865)
 
     (*) stand-alone printing, optional. Encoder, buttons and beeper go to a
         PCF8574 I/O expander on the I2C bus, no pins needed; its P6 / P7
@@ -230,12 +230,10 @@
 /*
   Reserved for planned features (the firmware doesn't use them yet):
 
-    SD card CS            PC_14  SPI1 shared with the SPI flash; PC14 is
+    spare                 PC_15  Z2_STEP (Z_STEPPER_ALIGN above) or MAX31865
+                                 CS (HOTEND_MAX31865 below); PC14/PC15 are
                                  the 32.768 kHz crystal: remove it (the
                                  firmware doesn't use the LSE)
-    spare                 PC_15  SD detect, Z2_STEP (Z_STEPPER_ALIGN
-                                 above) or MAX31865 CS (HOTEND_MAX31865
-                                 below), same crystal removal
     display               I2C1   PB6/PB7 (SSD1306 or HD44780 + PCF8574)
     encoder, buttons,     I2C1   PCF8574 I/O expander, address 0x20..0x27,
     beeper                       P0..P5 (P6 / P7: fans, see PCF8574_ADDRESS)
@@ -266,8 +264,10 @@
 /** \def SPI_FLASH
   SPI flash chip (W25Q16..W25Q128) soldered to the footprint on the bottom
   of the Black Pill: SPI1, CS PA4, SCK PA5, MISO PA6, MOSI PA7. Holds the
-  settings (M500) and G-code files (M28 upload, M20/M23/M24 print). Without
-  a chip the firmware falls back to internal Flash for the settings.
+  settings (M500), the power loss records and G-code files (M28 upload,
+  M20/M23/M24 print; not with an SD card, which takes these commands then).
+  Without a chip the firmware falls back to internal Flash for the
+  settings.
   PA4..PA7 are taken then, the thermistors are on PA1/PB1 for that reason.
 */
 #define SPI_FLASH
@@ -285,6 +285,20 @@
 #define I2C_SCL_PIN              PB_6
 #define I2C_SDA_PIN              PB_7
 #define I2C_SPEED                400000UL
+
+/** \def SD_CARD_SELECT_PIN
+  SD card in SPI mode on the bus of the SPI flash: SCK PA5, MISO PA6 (card
+  DO), MOSI PA7 (card DI), chip select PC14 (remove the 32.768 kHz
+  crystal). The card and its module run on 3.3 V: a module without level
+  shifter, or one whose MISO driver is switched off by CS. Cheap modules
+  with a 74LVC125 often drive MISO all the time: then the SPI flash (and a
+  MAX31865) don't work anymore.
+
+  M20..M27 use the card then (Petit FatFs: FAT16 / FAT32, 8.3 names, read
+  only, so no M28 upload), the SPI flash keeps the settings and the power
+  loss records. The card is mounted at startup, M21 after changing it.
+*/
+//#define SD_CARD_SELECT_PIN       PC_14
 
 /***************************************************************************\
 * 3. TEMPERATURE SENSORS                                                    *
