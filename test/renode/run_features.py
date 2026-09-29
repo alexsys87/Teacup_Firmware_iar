@@ -361,13 +361,16 @@ check('  busy: paused for user', 'echo:busy: paused for user' in uart('ro_print'
 m = MODEL.get('ro_resumed', {})
 p = pos('ro_pos')
 check('M108: load, back, prime, E logical unchanged', p is not None and p[0] == 120.0 and p[1] == 90.0 and p[2] == 0.2 and p[3] == 40.0, p)
-check('  nozzle back 0.2 above the bed', near(m.get('gap'), 0.2, 0.01) and near(m.get('x'), 120, XYTOL), (m.get('gap'), m.get('x')))
+# 15 um: the firmware follows the Catmull-Rom subdivided mesh
+# (MESH_SUBDIVISIONS), the model bed is bilinear per cell; at X120 Y90 the
+# two differ by ~10 um. The nozzle comes back to where it was before.
+check('  nozzle back 0.2 above the bed', near(m.get('gap'), 0.2, 0.015) and near(m.get('x'), 120, XYTOL), (m.get('gap'), m.get('x')))
 check('  filament: +40 - 12 (change)', near(m.get('e', 0) - e0, 40 - 12, 0.05), round(m.get('e', 0) - e0, 3))
 u = uart('m600')
 m = MODEL.get('m600_parked', {})
 check('M600: prompt, parked', '//action:prompt_show' in u and near(m.get('x'), 10, XYTOL), (u[-4:], m.get('x')))
 m = MODEL.get('m600_done', {})
-check('M876 S0 continues', 'echo:Resuming' in uart('m600') + uart('m600_go') and near(m.get('x'), 120, XYTOL) and near(m.get('gap'), 0.2, 0.01)
+check('M876 S0 continues', 'echo:Resuming' in uart('m600') + uart('m600_go') and near(m.get('x'), 120, XYTOL) and near(m.get('gap'), 0.2, 0.015)
       and near(m.get('e', 0) - e0, 40 - 12 - 2, 0.05), (uart('m600_go')[-3:], m.get('x'), m.get('gap'), round(m.get('e', 0) - e0, 3)))
 u = uart('ro_off')
 check('M412 S0: no pause', not any('unout' in l and 'OFF' not in l for l in u) and pos('ro_off') is not None and pos('ro_off')[3] == 80.0,
