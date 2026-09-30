@@ -34,7 +34,7 @@ src
 ```
 
 **Файлы проекта** — все `*.c` из каталогов:
-`./` (`mendel.c`), `cmsis/` (`system_stm32f4xx.c`), `hal/`, `core/`,
+`app/` (`mendel.c`), `cmsis/` (`system_stm32f4xx.c`), `hal/`, `core/`,
 `display/`, `motion/`, `pff/`, `src/`, плюс один startup-файл `.s`
 из таблицы. Каталог `test/` в проект **не** добавлять.
 
