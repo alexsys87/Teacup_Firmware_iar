@@ -18,6 +18,7 @@
 #include "heater.h"
 #include "pinio.h"
 #include "thermal_protection.h"
+#include "atomic.h"
 
 #if defined TEMP_MAX6675 || defined TEMP_MAX31865
   #include "spi.h"
@@ -648,9 +649,14 @@ static uint16_t read_temp_sensor(temp_sensor_t i) {
 }
 
 uint8_t temp_m108_seen(void) {
-  uint8_t f = m108_flag;
+  uint8_t f;
 
-  m108_flag = 0;
+  // Read and clear together: an M108 from the serial interrupt between the
+  // two would be lost (the wait loops call this all the time).
+  ATOMIC_START();
+    f = m108_flag;
+    m108_flag = 0;
+  ATOMIC_END();
   return f;
 }
 
