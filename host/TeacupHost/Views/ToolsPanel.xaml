@@ -1,0 +1,105 @@
+<UserControl
+    x:Class="TeacupHost.Views.ToolsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+        <StackPanel>
+            <!-- Diagnostics -->
+            <ui:Card Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Проверка принтера" />
+                    <WrapPanel IsEnabled="{Binding IsOnline}">
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Прошивка (M115)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M115" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Концевики (M119)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M119" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Позиция (M114)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M114" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Настройки (M503)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M503" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Сохранить (M500)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M500" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Температура (M105)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M105" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Сетка стола (G29)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="G28&#x0a;G29" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Показать сетку (M420 V)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M420 V" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Драйверы TMC (M122)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M122" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Время печати (M31)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M31" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Статистика (M78)"
+                                   Command="{Binding SendRawCommand}" CommandParameter="M78" />
+                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Fire24}" Content="Автоподбор PID (M303)"
+                                   Command="{Binding PidTuneCommand}" ToolTip="Температура — из вкладки «Нагрев»" />
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource Hint}" Text="Ответы — в консоли справа." />
+                </StackPanel>
+            </ui:Card>
+
+            <!-- Emergency -->
+            <ui:Card Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Остановка" />
+                    <WrapPanel>
+                        <ui:Button Style="{StaticResource SmallButton}" Appearance="Danger" Icon="{ui:SymbolIcon ErrorCircle24}"
+                                   Content="Аварийный стоп (M112)" Command="{Binding EmergencyStopCommand}" />
+                        <ui:Button Style="{StaticResource SmallButton}" Appearance="Caution" Content="Стоп движения (M410)"
+                                   Command="{Binding QuickStopCommand}" />
+                        <ui:Button Style="{StaticResource SmallButton}" Content="Не ждать нагрев (M108)"
+                                   Command="{Binding CancelWaitCommand}" />
+                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowReset24}" Content="Сброс (M999)"
+                                   Command="{Binding ResetCommand}" />
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="M112, M410 и M108 уходят сразу, в обход очереди: прошивка разбирает их прямо в прерывании. После M999 по USB плата переподключается — нажмите «Подключить»." />
+                </StackPanel>
+            </ui:Card>
+
+            <!-- Macros -->
+            <ui:Card Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Макросы" />
+                    <ItemsControl ItemsSource="{Binding Macros}" IsEnabled="{Binding IsOnline}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <ui:Button Style="{StaticResource SmallButton}" Appearance="Secondary" Content="{Binding Name}"
+                                           ToolTip="{Binding Script}"
+                                           Command="{Binding DataContext.RunMacroCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                           CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Expander Header="Редактор макросов" Margin="0,6,0,0">
+                        <StackPanel Margin="0,8,0,0">
+                            <ComboBox ItemsSource="{Binding Macros}" SelectedItem="{Binding SelectedMacro}" DisplayMemberPath="Name" />
+                            <StackPanel Visibility="{Binding SelectedMacro, Converter={StaticResource NullToVisibility}}">
+                                <ui:TextBox Margin="0,6,0,0" PlaceholderText="Название"
+                                            Text="{Binding SelectedMacro.Name, UpdateSourceTrigger=PropertyChanged}" />
+                                <ui:TextBox Margin="0,6,0,0" PlaceholderText="G-код, по строке на команду" MinHeight="90"
+                                            AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="{StaticResource MonoFont}"
+                                            VerticalScrollBarVisibility="Auto"
+                                            Text="{Binding SelectedMacro.Script, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <WrapPanel Margin="0,6,0,0">
+                                <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Add24}" Content="Добавить"
+                                           Command="{Binding AddMacroCommand}" />
+                                <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Delete24}" Content="Удалить"
+                                           Command="{Binding DeleteMacroCommand}" />
+                            </WrapPanel>
+                            <TextBlock Style="{StaticResource Hint}" Text="Макросы сохраняются при выходе из программы." />
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </ui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
