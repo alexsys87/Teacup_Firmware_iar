@@ -18,6 +18,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     /// <summary>Item of the port list that stands for the virtual printer (shown localized).</summary>
     public const string VirtualPortName = "\u0001virtual";
+
+    /// <summary>Item of the port list for a Telnet / TCP serial bridge (shown localized).</summary>
+    public const string NetworkPortName = "\u0001network";
     private const int MaxLogEntries = 3000;
 
     private readonly AppSettings _settings;
@@ -129,12 +132,40 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         get => _selectedPort;
         set
         {
-            if (Set(ref _selectedPort, value))
-                OnPropertyChanged(nameof(IsVirtualSelected));
+            if (!Set(ref _selectedPort, value))
+                return;
+            OnPropertyChanged(nameof(IsVirtualSelected));
+            OnPropertyChanged(nameof(IsNetworkSelected));
+            OnPropertyChanged(nameof(IsSerialSelected));
         }
     }
 
     public bool IsVirtualSelected => SelectedPort == VirtualPortName;
+    public bool IsNetworkSelected => SelectedPort == NetworkPortName;
+    public bool IsSerialSelected => !IsVirtualSelected && !IsNetworkSelected;
+
+    /// <summary>Telnet bridge: "host" or "host:port" (23 by default).</summary>
+    public string NetworkAddress
+    {
+        get => _settings.NetworkAddress;
+        set
+        {
+            _settings.NetworkAddress = value.Trim();
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Open the link again by itself after it breaks (COM port gone, network down).</summary>
+    public bool AutoReconnect
+    {
+        get => _settings.AutoReconnect;
+        set
+        {
+            _settings.AutoReconnect = value;
+            _conn.AutoReconnect = value;
+            OnPropertyChanged();
+        }
+    }
 
     private int _selectedBaud;
     public int SelectedBaud
@@ -182,6 +213,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ConnectionState.Online => Loc.F("S.State.Online",
             _conn.PortName == "Virtual printer" ? Loc.T("S.VirtualPrinter") : _conn.PortName ?? ""),
         ConnectionState.Halted => Loc.T("S.State.Halted"),
+        ConnectionState.Reconnecting => Loc.T("S.State.Reconnecting"),
         _ => "",
     };
 
@@ -202,6 +234,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Ports.Clear();
         foreach (var p in SerialPortTransport.GetPortNames())
             Ports.Add(p);
+        Ports.Add(NetworkPortName);
         Ports.Add(VirtualPortName);
         SelectedPort = current != null && Ports.Contains(current) ? current : Ports.FirstOrDefault();
     }
@@ -212,13 +245,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         try
         {
-            IPrinterTransport transport = SelectedPort == VirtualPortName
-                ? new VirtualPrinter { TimeScale = VirtualTimeScale }
-                : new SerialPortTransport(SelectedPort, SelectedBaud);
-            Log(LogKind.Info, transport is VirtualPrinter
-                ? Loc.F("S.Log.ConnectingVirtual", VirtualTimeScale)
-                : Loc.F("S.Log.Connecting", transport.Name, SelectedBaud));
-            _conn.Connect(transport);
+            _conn.AutoReconnect = AutoReconnect;
+            if (IsVirtualSelected)
+            {
+                Log(LogKind.Info, Loc.F("S.Log.ConnectingVirtual", VirtualTimeScale));
+                _conn.Connect(new VirtualPrinter { TimeScale = VirtualTimeScale });
+            }
+            else if (IsNetworkSelected)
+            {
+                if (string.IsNullOrWhiteSpace(NetworkAddress))
+                {
+                    Notify(Loc.T("S.Notice.ConnectFailed"), Loc.T("S.Notice.AddressEmpty"), NotifySeverity.Warning);
+                    return;
+                }
+                var (host, port) = TcpTransport.ParseAddress(NetworkAddress);
+                Log(LogKind.Info, Loc.F("S.Log.ConnectingNetwork", host, port));
+                // A factory: every reconnect opens a new socket.
+                _conn.Connect(() => new TcpTransport(host, port));
+            }
+            else
+            {
+                string port = SelectedPort;
+                int baud = SelectedBaud;
+                Log(LogKind.Info, Loc.F("S.Log.Connecting", port, baud));
+                _conn.Connect(() => new SerialPortTransport(port, baud));
+            }
             _settings.Port = SelectedPort;
             _settings.BaudRate = SelectedBaud;
         }
@@ -244,7 +295,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _conn.LineReceived += OnLineReceived;
         _conn.LineSent += OnLineSent;
         _conn.Info += (msg, detail) =>
-            _pendingLog.Enqueue(new LogEntry(LogKind.Info, Loc.F("S.Conn." + msg, detail)));
+        {
+            bool bad = msg is ConnectionMessage.LinkLost or ConnectionMessage.LinkTimeout or
+                ConnectionMessage.HostLostDuringOutage or ConnectionMessage.PrinterResetDuringPrint;
+            _pendingLog.Enqueue(new LogEntry(bad ? LogKind.Warning : LogKind.Info, Loc.F("S.Conn." + msg, detail)));
+            if (msg is ConnectionMessage.HostLostDuringOutage or ConnectionMessage.PrinterResetDuringPrint)
+                Ui(() => Notify(Loc.T("S.Notice.PrintAborted"), Loc.F("S.Conn." + msg, detail), NotifySeverity.Error));
+            else if (msg == ConnectionMessage.JobResumed)
+                Ui(() => Notify(Loc.T("S.Notice.LinkRestored"), Loc.F("S.Conn." + msg, detail), NotifySeverity.Success));
+        };
         _conn.TemperatureUpdated += t => Ui(() => OnTemperature(t));
         _conn.PositionUpdated += p => Ui(() => OnPosition(p));
         _conn.PrinterError += e => Ui(() => OnPrinterError(e));
@@ -259,6 +318,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _conn.SdFileSelected += (name, size) => Ui(() => SdStatus = Loc.F("S.SdSelected", name, size));
         _conn.SdMessage += msg => Ui(() => OnSdMessage(msg));
         _conn.SdPrintFinished += () => Ui(OnSdPrintFinished);
+        _conn.AutoReconnect = _settings.AutoReconnect;
     }
 
     private void Ui(Action a) => _dispatcher.BeginInvoke(a, DispatcherPriority.Normal);
@@ -278,6 +338,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         else if (s == ConnectionState.Online && old != ConnectionState.Online)
         {
             _conn.SdRefresh();
+            if (old == ConnectionState.Reconnecting && PrintSource != PrintSource.Host)
+                Notify(Loc.T("S.Notice.LinkRestored"), Loc.T("S.Conn.Reconnected"), NotifySeverity.Success);
+        }
+        else if (s == ConnectionState.Reconnecting)
+        {
+            Notify(Loc.T("S.Notice.LinkLost"),
+                Loc.T(PrintSource == PrintSource.Host ? "S.Notice.LinkLostPrinting" : "S.Notice.LinkLostText"),
+                NotifySeverity.Warning);
         }
         else if (s == ConnectionState.Halted)
         {
@@ -459,7 +527,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         bool error = line.StartsWith("Error", StringComparison.OrdinalIgnoreCase) ||
                      line.StartsWith("!!", StringComparison.Ordinal);
+        // Line number errors are part of the protocol (a resend follows): a warning.
+        if (error && line.Contains("Line Number", StringComparison.OrdinalIgnoreCase))
+            error = false;
         bool warn = line.StartsWith("Resend", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("Error", StringComparison.OrdinalIgnoreCase) ||
                     line.Contains("Unknown command", StringComparison.OrdinalIgnoreCase);
         _pendingLog.Enqueue(new LogEntry(error ? LogKind.Error : warn ? LogKind.Warning : LogKind.Received, line));
     }

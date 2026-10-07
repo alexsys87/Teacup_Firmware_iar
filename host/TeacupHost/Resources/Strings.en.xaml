@@ -12,7 +12,7 @@
     <sys:String x:Key="S.EStop">STOP (M112)</sys:String>
     <sys:String x:Key="S.EStopTip">Emergency stop: heaters and motors off at once. Then M999</sys:String>
     <sys:String x:Key="S.Cube">Cube</sys:String>
-    <sys:String x:Key="S.CubeTip">Open the 10 mm calibration cube</sys:String>
+    <sys:String x:Key="S.CubeTip">Open the 10 × 10 × 10 cm test cube</sys:String>
     <sys:String x:Key="S.Open">Open</sys:String>
     <sys:String x:Key="S.HotendChip" xml:space="preserve">Hotend </sys:String>
     <sys:String x:Key="S.BedChip" xml:space="preserve">Bed </sys:String>
@@ -65,7 +65,7 @@
     <sys:String x:Key="S.ListingTip">Click a line to simulate up to it</sys:String>
     <sys:String x:Key="S.File">File</sys:String>
     <sys:String x:Key="S.OpenEllipsis">Open…</sys:String>
-    <sys:String x:Key="S.CubeModel">10 mm test cube</sys:String>
+    <sys:String x:Key="S.CubeModel">10 cm test cube</sys:String>
     <sys:String x:Key="S.DropHint">You can also drop a file onto the window.</sys:String>
     <sys:String x:Key="S.HostPrintTitle">Print from this computer (COM port)</sys:String>
     <sys:String x:Key="S.Print">Print</sys:String>
@@ -148,10 +148,16 @@
     <sys:String x:Key="S.PowerLabel" xml:space="preserve">power </sys:String>
     <sys:String x:Key="S.TargetLabel" xml:space="preserve">target </sys:String>
     <sys:String x:Key="S.VirtualPrinter">Virtual printer</sys:String>
+    <sys:String x:Key="S.NetworkPort">Network (Telnet)</sys:String>
+    <sys:String x:Key="S.AddressTip">Address of the Telnet bridge (ESP3D, ser2net, WiFi-UART): IP or name, port after a colon, 23 by default</sys:String>
+    <sys:String x:Key="S.ConnectionTitle">Connection</sys:String>
+    <sys:String x:Key="S.AutoReconnect">Reconnect automatically</sys:String>
+    <sys:String x:Key="S.AutoReconnectHint">When the COM port goes away (cable, USB restart) or the network drops, the program opens the connection again every second. A print from this computer waits and goes on from the line where it stopped: the firmware's line numbers show what the printer already has. If the printer parked during the outage (HOST_WATCH: USB gone for over 2 s with an empty queue) or restarted, the print is stopped, it can't be continued. With no line from the printer for 15 s the connection is reopened as well.</sys:String>
     <sys:String x:Key="S.State.Disconnected">Not connected</sys:String>
     <sys:String x:Key="S.State.Connecting">Connecting…</sys:String>
     <sys:String x:Key="S.State.Online">Online · {0}</sys:String>
     <sys:String x:Key="S.State.Halted">HALTED (M999)</sys:String>
+    <sys:String x:Key="S.State.Reconnecting">Link lost, reconnecting…</sys:String>
     <sys:String x:Key="S.Conn.Online">Printer online</sys:String>
     <sys:String x:Key="S.Conn.LinkLost">Connection lost: {0}</sys:String>
     <sys:String x:Key="S.Conn.ResendNotInHistory">The printer asks for line {0}, it's no longer in the history</sys:String>
@@ -160,10 +166,21 @@
     <sys:String x:Key="S.Conn.PrinterResetDuringPrint">The printer restarted, the print is lost</sys:String>
     <sys:String x:Key="S.Conn.HandshakeRetry">No answer, sending M110 again</sys:String>
     <sys:String x:Key="S.Conn.OkTimeout">No answer for 20 s, resynchronising (M105)</sys:String>
+    <sys:String x:Key="S.Conn.LinkTimeout">Nothing from the printer for {0} s, reopening the connection</sys:String>
+    <sys:String x:Key="S.Conn.Reconnected">Connection restored</sys:String>
+    <sys:String x:Key="S.Conn.JobResumed">The print goes on, next line N{0}</sys:String>
+    <sys:String x:Key="S.Conn.HostLostDuringOutage">While the link was down the printer parked or restarted (the hotend target dropped). The print is stopped, it can't be continued.</sys:String>
     <sys:String x:Key="S.Log.Connecting">Connecting to {0}, {1} baud</sys:String>
+    <sys:String x:Key="S.Log.ConnectingNetwork">Connecting to {0}:{1} over the network (Telnet)</sys:String>
     <sys:String x:Key="S.Log.ConnectingVirtual">Connecting to the virtual printer (time ×{0:0})</sys:String>
     <sys:String x:Key="S.Log.PortFailed">Couldn't open the port: {0}</sys:String>
     <sys:String x:Key="S.Notice.ConnectFailed">Connection failed</sys:String>
+    <sys:String x:Key="S.Notice.AddressEmpty">Enter the address of the Telnet bridge, e.g. 192.168.1.100:23</sys:String>
+    <sys:String x:Key="S.Notice.LinkLost">Connection lost</sys:String>
+    <sys:String x:Key="S.Notice.LinkLostText">Reconnecting… The connection opens by itself when the port or network is back.</sys:String>
+    <sys:String x:Key="S.Notice.LinkLostPrinting">The print waits for the link and goes on by itself. If USB is gone for over 2 s the firmware may park the printer, then the print stops.</sys:String>
+    <sys:String x:Key="S.Notice.LinkRestored">Connection restored</sys:String>
+    <sys:String x:Key="S.Notice.PrintAborted">Print stopped</sys:String>
     <sys:String x:Key="S.Ask.DisconnectWhilePrinting">A print is running. Disconnect from the printer?</sys:String>
     <sys:String x:Key="S.Log.SdLostOnDisconnect">Connection lost, the SD print goes on in the printer unattended</sys:String>
     <sys:String x:Key="S.Log.Disconnected">Disconnected</sys:String>

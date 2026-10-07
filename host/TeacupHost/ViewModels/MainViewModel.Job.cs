@@ -99,7 +99,7 @@ public sealed partial class MainViewModel
     }
 
     private Task LoadDemoAsync() =>
-        LoadAsync("cube10.gcode", () => GCodeDocument.FromText("cube10.gcode", DemoGCode.Generate()));
+        LoadAsync("cube100.gcode", () => GCodeDocument.FromText("cube100.gcode", DemoGCode.Generate()));
 
     private async Task LoadAsync(string name, Func<GCodeDocument> load)
     {

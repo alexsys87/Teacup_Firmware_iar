@@ -9,6 +9,8 @@ public enum ConnectionState
     Online,
     /// <summary>The firmware called printer_kill(); only M999 or reset helps.</summary>
     Halted,
+    /// <summary>The link broke; the port or socket is opened again until it works.</summary>
+    Reconnecting,
 }
 
 /// <summary>
@@ -33,6 +35,17 @@ public enum ConnectionMessage
     HandshakeRetry,
     /// <summary>20 s of silence while waiting for "ok", resynchronising with M105.</summary>
     OkTimeout,
+    /// <summary>Nothing received for a long time, the link is treated as broken; detail: seconds.</summary>
+    LinkTimeout,
+    /// <summary>The port or socket is open again.</summary>
+    Reconnected,
+    /// <summary>The print goes on after a reconnect; detail: line number it resumes with.</summary>
+    JobResumed,
+    /// <summary>
+    /// After a reconnect the hotend target is lower than before: the firmware
+    /// parked (HOST_WATCH) or restarted. The print can't be continued.
+    /// </summary>
+    HostLostDuringOutage,
 }
 
 public enum JobKind
@@ -88,6 +101,16 @@ public sealed class PrinterConnection : IDisposable
     }
 
     private readonly object _lock = new();
+    private Func<IPrinterTransport>? _factory;
+    private bool _attemptRunning;
+    private double _lastAttempt;
+    private int _lastAckedLine;
+    private bool _resync;
+    private int? _pendingResendFrom;
+    private double _resyncStarted;
+    private double _resyncLastProbe;
+    private double _lastHotendTarget = -1;
+    private double _targetBeforeLoss = -1;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private IPrinterTransport? _transport;
     private Timer? _timer;
@@ -127,6 +150,25 @@ public sealed class PrinterConnection : IDisposable
     /// <summary>M155 interval for temperature auto reports, 0 to poll with M105.</summary>
     public int TemperatureInterval { get; set; } = 2;
 
+    /// <summary>
+    /// Open the link again when it breaks (COM port gone for a moment, network
+    /// down). Needs a connection made with a transport factory.
+    /// </summary>
+    public bool AutoReconnect { get; set; } = true;
+
+    /// <summary>Seconds between attempts to open the link again.</summary>
+    public double ReconnectInterval { get; set; } = 1.0;
+
+    /// <summary>
+    /// Seconds without any line from the printer after which the link counts as
+    /// broken (with auto reconnect). Temperature reports come every
+    /// <see cref="TemperatureInterval"/> s and "busy" every 2 s, so silence means a dead link.
+    /// </summary>
+    public double LinkTimeout { get; set; } = 15;
+
+    /// <summary>True while the connection opens the link again by itself.</summary>
+    public bool CanReconnect { get { lock (_lock) return _factory != null && AutoReconnect; } }
+
     public bool IsJobActive { get { lock (_lock) return _job != null; } }
     public bool IsJobPaused { get { lock (_lock) return _job != null && _jobPaused; } }
     public JobKind ActiveJobKind { get { lock (_lock) return _jobKind; } }
@@ -159,7 +201,16 @@ public sealed class PrinterConnection : IDisposable
 
     // ---------------------------------------------------------------- connect
 
-    public void Connect(IPrinterTransport transport)
+    /// <summary>Connect once; a broken link ends the connection.</summary>
+    public void Connect(IPrinterTransport transport) => Connect(transport, null);
+
+    /// <summary>
+    /// Connect with a factory that makes a new transport for every attempt:
+    /// with <see cref="AutoReconnect"/> a broken link is opened again.
+    /// </summary>
+    public void Connect(Func<IPrinterTransport> factory) => Connect(factory(), factory);
+
+    private void Connect(IPrinterTransport transport, Func<IPrinterTransport>? factory)
     {
         Disconnect();
         // Open first: a busy or missing port throws here and leaves nothing behind.
@@ -174,15 +225,51 @@ public sealed class PrinterConnection : IDisposable
         }
         lock (_lock)
         {
-            _transport = transport;
-            transport.LineReceived += OnLine;
-            transport.Faulted += OnFaulted;
+            _factory = factory;
+            Attach(transport);
             ResetProtocol();
-            _lastRx = Now;
             SetState(ConnectionState.Connecting);
             SendHandshake();
             _timer = new Timer(_ => OnTimer(), null, 250, 250);
         }
+    }
+
+    private void Attach(IPrinterTransport transport)
+    {
+        _transport = transport;
+        transport.LineReceived += OnLine;
+        transport.Faulted += OnFaulted;
+        _lastRx = Now;
+    }
+
+    private IPrinterTransport? Detach()
+    {
+        var t = _transport;
+        if (t == null)
+            return null;
+        _transport = null;
+        t.LineReceived -= OnLine;
+        t.Faulted -= OnFaulted;
+        return t;
+    }
+
+    /// <summary>Close in the background: closing a vanished COM port can hang for a while.</summary>
+    private static void CloseQuietly(IPrinterTransport? t)
+    {
+        if (t == null)
+            return;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                t.Close();
+                t.Dispose();
+            }
+            catch
+            {
+                // The link is gone anyway.
+            }
+        });
     }
 
     public void Disconnect() => Disconnect(null);
@@ -192,14 +279,13 @@ public sealed class PrinterConnection : IDisposable
         IPrinterTransport? t;
         lock (_lock)
         {
-            t = _transport;
-            if (t == null)
+            if (_transport == null && State == ConnectionState.Disconnected)
                 return;
-            _transport = null;
+            _factory = null;
+            t = Detach();
             _timer?.Dispose();
             _timer = null;
-            t.LineReceived -= OnLine;
-            t.Faulted -= OnFaulted;
+            _resync = false;
             AbortJob();
             _sdPrinting = false;
             ResetProtocol();
@@ -209,8 +295,8 @@ public sealed class PrinterConnection : IDisposable
         }
         try
         {
-            t.Close();
-            t.Dispose();
+            t?.Close();
+            t?.Dispose();
         }
         catch
         {
@@ -218,8 +304,134 @@ public sealed class PrinterConnection : IDisposable
         }
     }
 
-    private void OnFaulted(Exception ex) =>
-        ThreadPool.QueueUserWorkItem(_ => Disconnect((ConnectionMessage.LinkLost, ex.Message)));
+    private void OnFaulted(Exception ex) => ThreadPool.QueueUserWorkItem(_ => LinkFailed(ex.Message));
+
+    /// <summary>
+    /// The link broke. Without a factory that's the end of the connection.
+    /// With one the job, SD state and line numbering are kept: the lines the
+    /// printer didn't acknowledge go out again after the reconnect.
+    /// </summary>
+    private void LinkFailed(string detail)
+    {
+        IPrinterTransport? old;
+        lock (_lock)
+        {
+            if (_transport == null)
+                return;
+            if (_factory == null || !AutoReconnect)
+            {
+                Disconnect((ConnectionMessage.LinkLost, detail));
+                return;
+            }
+            old = Detach();
+
+            // Lines sent but not acknowledged: the printer may or may not have
+            // them. They go out again with their numbers; a line it already
+            // has is answered with "Resend" for the next one.
+            int? first = _resendFrom;
+            foreach (var f in _inFlight)
+                if (f.LineNumber > 0 && (first == null || f.LineNumber < first))
+                    first = f.LineNumber;
+            _pendingResendFrom = first;
+            _resendFrom = null;
+            _inFlight.Clear();
+            _priority.Clear();
+            _listingFiles = false;
+            _waitingSince = -1;
+            _resync = false;
+            _targetBeforeLoss = _lastHotendTarget;
+            _lastAttempt = Now;
+            Info?.Invoke(ConnectionMessage.LinkLost, detail);
+            SetState(ConnectionState.Reconnecting);
+        }
+        CloseQuietly(old);
+    }
+
+    /// <summary>One attempt to open the link again, outside the lock (opening can take seconds).</summary>
+    private void TryReconnect()
+    {
+        Func<IPrinterTransport>? factory;
+        lock (_lock)
+        {
+            factory = _factory;
+            if (factory == null || State != ConnectionState.Reconnecting || _attemptRunning)
+                return;
+            _attemptRunning = true;
+            _lastAttempt = Now;
+        }
+        IPrinterTransport? t = null;
+        try
+        {
+            t = factory();
+            t.Open();
+        }
+        catch
+        {
+            t?.Dispose();
+            t = null;
+        }
+        lock (_lock)
+        {
+            _attemptRunning = false;
+            if (t == null)
+                return;
+            if (State != ConnectionState.Reconnecting || _factory == null)
+            {
+                CloseQuietly(t);                // Disconnected meanwhile.
+                return;
+            }
+            Attach(t);
+            // An empty line ends whatever half line the printer got before the break.
+            t.WriteLine("");
+            Info?.Invoke(ConnectionMessage.Reconnected, "");
+            if (_job != null)
+            {
+                // Keep the numbering, but hold the job until a temperature
+                // report shows the printer didn't park or restart meanwhile.
+                SetState(ConnectionState.Online);
+                _resync = true;
+                _resyncStarted = Now;
+                ProbeTemperature();
+            }
+            else
+            {
+                ResetProtocol();
+                SetState(ConnectionState.Connecting);
+                SendHandshake();
+            }
+        }
+    }
+
+    /// <summary>Unnumbered M105: answered whatever line number the printer expects.</summary>
+    private void ProbeTemperature()
+    {
+        _resyncLastProbe = Now;
+        _inFlight.AddLast(new InFlight(-1, -1));
+        Write("M105", SendKind.Poll);
+    }
+
+    /// <summary>First temperature after a reconnect with a job: go on or give up.</summary>
+    private void CheckResync(TemperatureReading t)
+    {
+        if (!_resync)
+            return;
+        _resync = false;
+        if (_targetBeforeLoss > 0 && t.HotendTarget < _targetBeforeLoss - 0.5)
+        {
+            Info?.Invoke(ConnectionMessage.HostLostDuringOutage, "");
+            AbortJob();
+            ResetProtocol();
+            SetState(ConnectionState.Connecting);
+            SendHandshake();
+            return;
+        }
+        if (_pendingResendFrom is int r && r < _nextLine)
+            _resendFrom = r;
+        _pendingResendFrom = null;
+        Info?.Invoke(ConnectionMessage.JobResumed,
+            (_resendFrom ?? _nextLine).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Pump();
+    }
 
     private void ResetProtocol()
     {
@@ -230,6 +442,8 @@ public sealed class PrinterConnection : IDisposable
         _lineKind.Clear();
         _resendFrom = null;
         _nextLine = 1;
+        _lastAckedLine = 0;
+        _pendingResendFrom = null;
         _listingFiles = false;
         _waitingSince = -1;
     }
@@ -247,6 +461,7 @@ public sealed class PrinterConnection : IDisposable
         // "N0 M110 N0": next line number is 1. Repeated until the first "ok".
         _inFlight.Clear();
         _nextLine = 1;
+        _lastAckedLine = 0;
         string text = ResponseParser.FormatNumbered(0, "M110 N0");
         _inFlight.AddLast(new InFlight(0, -1));
         _handshakeSentAt = Now;
@@ -361,7 +576,8 @@ public sealed class PrinterConnection : IDisposable
     /// <summary>Send the next line if the previous one is acknowledged.</summary>
     private void Pump()
     {
-        if (_transport == null || State is ConnectionState.Disconnected or ConnectionState.Connecting)
+        if (_transport == null || _resync ||
+            State is ConnectionState.Disconnected or ConnectionState.Connecting or ConnectionState.Reconnecting)
             return;
         if (NumberedInFlight())
             return;
@@ -433,12 +649,11 @@ public sealed class PrinterConnection : IDisposable
 
             if (ResponseParser.IsOk(line))
             {
-                if (line.Length > 3 && ResponseParser.TryParseTemperature(line, out var okTemp))
-                {
-                    _lastTemperature = Now;
-                    TemperatureUpdated?.Invoke(okTemp);
-                }
+                TemperatureReading okTemp = default;
+                bool hasTemp = line.Length > 3 && ResponseParser.TryParseTemperature(line, out okTemp);
                 OnOk();
+                if (hasTemp)
+                    OnTemperature(okTemp);
                 return;
             }
 
@@ -470,8 +685,7 @@ public sealed class PrinterConnection : IDisposable
 
             if (ResponseParser.TryParseTemperature(line, out var temp))
             {
-                _lastTemperature = Now;
-                TemperatureUpdated?.Invoke(temp);
+                OnTemperature(temp);
                 return;
             }
 
@@ -483,6 +697,28 @@ public sealed class PrinterConnection : IDisposable
 
             ParseSdLine(line);
         }
+    }
+
+    private void OnTemperature(TemperatureReading t)
+    {
+        _lastTemperature = Now;
+        TemperatureUpdated?.Invoke(t);
+        CheckResync(t);
+        _lastHotendTarget = t.HotendTarget;
+    }
+
+    /// <summary>
+    /// The printer executed M104/M109: remember the hotend target before the
+    /// next temperature report shows it, a link outage may come first.
+    /// </summary>
+    private void TrackHotendTarget(int lineNumber)
+    {
+        if (!_history.TryGetValue(lineNumber, out var text) ||
+            (!text.Contains(" M104", StringComparison.Ordinal) && !text.Contains(" M109", StringComparison.Ordinal)))
+            return;
+        var c = GCode.GCodeCommand.Parse(text);
+        if (c.Letter == 'M' && c.Code is 104 or 109 && (c.TryGet('S', out double t) || c.TryGet('R', out t)))
+            _lastHotendTarget = t;
     }
 
     private void OnOk()
@@ -499,6 +735,10 @@ public sealed class PrinterConnection : IDisposable
             var f = _inFlight.First!.Value;
             _inFlight.RemoveFirst();
             bool failed = _resendFrom is int r && f.LineNumber >= r;
+            if (!failed && f.LineNumber > _lastAckedLine)
+                _lastAckedLine = f.LineNumber;
+            if (!failed && f.LineNumber > 0)
+                TrackHotendTarget(f.LineNumber);
             if (!failed && f.JobIndex >= 0 && f.JobIndex + 1 > _jobAcked && _job != null)
             {
                 _jobAcked = f.JobIndex + 1;
@@ -511,7 +751,32 @@ public sealed class PrinterConnection : IDisposable
 
     private void OnResend(int n)
     {
-        if (n >= _nextLine || n < 0)
+        if (_job != null && n <= _lastAckedLine && n > 0)
+        {
+            // It wants a line it already acknowledged: it restarted.
+            Info?.Invoke(ConnectionMessage.PrinterResetDuringPrint, "");
+            AbortJob();
+            ResetProtocol();
+            SendHandshake();
+            SetState(ConnectionState.Connecting);
+            return;
+        }
+        if (_resync)
+        {
+            // Answer to the half line ended after a reconnect: that's where it stands.
+            if (n < _nextLine)
+                _pendingResendFrom = n;
+            return;
+        }
+        if (n == _nextLine)
+        {
+            // It has every line we sent (an "ok" got lost on the way, e.g. in
+            // a link outage): nothing to send again. The "ok" that follows
+            // acknowledges the line in flight.
+            _resendFrom = null;
+            return;
+        }
+        if (n > _nextLine || n < 0)
         {
             Info?.Invoke(ConnectionMessage.ResendUnknownLine, n.ToString(System.Globalization.CultureInfo.InvariantCulture));
             // The printer lost track (reset?), start numbering again.
@@ -606,9 +871,40 @@ public sealed class PrinterConnection : IDisposable
     {
         lock (_lock)
         {
+            double now = Now;
+            if (State == ConnectionState.Reconnecting)
+            {
+                if (now - _lastAttempt >= ReconnectInterval && !_attemptRunning)
+                    ThreadPool.QueueUserWorkItem(_ => TryReconnect());
+                return;
+            }
             if (_transport == null)
                 return;
-            double now = Now;
+
+            // With auto reconnect, a long silence means a dead link (a USB
+            // bridge that hangs, a network that drops packets): open it again.
+            if (_factory != null && AutoReconnect && now - _lastRx > LinkTimeout)
+            {
+                ThreadPool.QueueUserWorkItem(_ => LinkFailed(
+                    Math.Round(LinkTimeout).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                _lastRx = now;
+                return;
+            }
+
+            if (_resync)
+            {
+                // No temperature yet: ask again, give up after 15 s.
+                if (now - _resyncStarted > 15)
+                {
+                    ThreadPool.QueueUserWorkItem(_ => LinkFailed("no answer after reconnect"));
+                    _resyncStarted = now;
+                }
+                else if (now - _resyncLastProbe > 3)
+                {
+                    ProbeTemperature();
+                }
+                return;
+            }
 
             if (State == ConnectionState.Connecting)
             {

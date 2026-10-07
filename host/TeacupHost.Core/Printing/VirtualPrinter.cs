@@ -61,7 +61,7 @@ public sealed class VirtualPrinter : IPrinterTransport
 
     public VirtualPrinter()
     {
-        _files.Add(("CUBE10.GCO", Encoding.ASCII.GetBytes(DemoGCode.Generate())));
+        _files.Add(("CUBE100.GCO", Encoding.ASCII.GetBytes(DemoGCode.Generate())));
     }
 
     public string Name => "Virtual printer";
@@ -77,6 +77,18 @@ public sealed class VirtualPrinter : IPrinterTransport
     public event Action<Exception>? Faulted;
 
     public IReadOnlyList<(string Name, byte[] Data)> Files => _files;
+
+    /// <summary>Restart like after a reset or a power dip (for tests of the host).</summary>
+    public void Reboot() => _input.Add("\u0001start");
+
+    /// <summary>
+    /// What the firmware's HOST_WATCH does when the host is gone: retract, lift,
+    /// park, hotend off (for tests of the host).
+    /// </summary>
+    public void ParkAsHostLost() => _input.Add("\u0001hostlost");
+
+    /// <summary>Hotend target, °C (for tests).</summary>
+    public double HotendTarget => _hotendTarget;
 
     public void Open()
     {
@@ -154,6 +166,15 @@ public sealed class VirtualPrinter : IPrinterTransport
                 if (line == "\u0001start")
                 {
                     Boot();
+                    continue;
+                }
+                if (line == "\u0001hostlost")
+                {
+                    DrainPlanner();
+                    _z += 10;
+                    _hotendTarget = 0;
+                    Emit("echo:Host lost, parking");
+                    Emit("echo:Parked, hotend temperature lowered");
                     continue;
                 }
                 HostLine(line);
@@ -320,11 +341,14 @@ public sealed class VirtualPrinter : IPrinterTransport
     {
         Emit($"Error:{msg}, Last Line: {_lastN}");
         // The firmware drops everything that follows in the receive buffer.
+        var keep = new List<string>();
         while (_input.TryTake(out var dropped))
         {
-            if (dropped == "\u0001start")
-                _input.Add(dropped);
+            if (dropped.StartsWith('\u0001'))
+                keep.Add(dropped);              // Simulator events, not host lines.
         }
+        foreach (var k in keep)
+            _input.Add(k);
         Emit($"Resend: {_lastN + 1}");
         Emit("ok");
     }
