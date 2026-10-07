@@ -61,10 +61,10 @@ public sealed class VirtualPrinter : IPrinterTransport
 
     public VirtualPrinter()
     {
-        _files.Add(("DEMO.GCO", Encoding.ASCII.GetBytes(DemoGCode.Generate(size: 20, height: 4))));
+        _files.Add(("CUBE10.GCO", Encoding.ASCII.GetBytes(DemoGCode.Generate())));
     }
 
-    public string Name => "Виртуальный принтер";
+    public string Name => "Virtual printer";
     public bool IsOpen => _running;
 
     /// <summary>Speed of time: 1 is real time, 10 makes moves and heating 10 times faster.</summary>

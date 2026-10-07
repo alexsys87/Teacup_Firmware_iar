@@ -1,6 +1,7 @@
 using System.Windows.Media.Media3D;
 using TeacupHost.Core.GCode;
 using TeacupHost.Infrastructure;
+using TeacupHost.Services;
 
 namespace TeacupHost.ViewModels;
 
@@ -29,9 +30,9 @@ public sealed partial class MainViewModel
 
     public string ModeText => ViewerMode switch
     {
-        ViewerMode.Simulation => "СИМУЛЯЦИЯ",
-        ViewerMode.Live => "ПЕЧАТЬ",
-        _ => "ПРОСМОТР",
+        ViewerMode.Simulation => Loc.T("S.Mode.Simulation"),
+        ViewerMode.Live => Loc.T("S.Mode.Live"),
+        _ => Loc.T("S.Mode.Preview"),
     };
 
     public int LayerCount => Toolpath?.Layers.Count ?? 0;
@@ -68,7 +69,7 @@ public sealed partial class MainViewModel
             if (tp == null || tp.Layers.Count == 0)
                 return "—";
             int l = Math.Clamp(MaxLayer, 0, tp.Layers.Count - 1);
-            return $"{l + 1} / {tp.Layers.Count} · Z {tp.Layers[l].Z:0.##}";
+            return Loc.F("S.LayerText", l + 1, tp.Layers.Count, tp.Layers[l].Z);
         }
     }
 
@@ -106,7 +107,7 @@ public sealed partial class MainViewModel
     }
 
     public string CurrentLineNumberText => CurrentLine >= 0 && Document != null
-        ? $"Строка {CurrentLine + 1:N0} из {Document.Lines.Count:N0}"
+        ? Loc.F("S.LineOf", CurrentLine + 1, Document.Lines.Count)
         : "";
 
     private string _currentLineText = "";
@@ -138,8 +139,7 @@ public sealed partial class MainViewModel
                 SegmentLimit = segment + 1;
                 MaxLayer = s.Layer;
                 NozzlePosition = nozzle ?? new Point3D(s.End.X, s.End.Y, s.End.Z);
-                NozzleText = $"X {NozzlePosition.X:0.00}  Y {NozzlePosition.Y:0.00}  Z {NozzlePosition.Z:0.00}  " +
-                             $"F {s.Speed * 60:0} мм/мин";
+                NozzleText = Loc.F("S.NozzleText", NozzlePosition.X, NozzlePosition.Y, NozzlePosition.Z, s.Speed * 60);
             }
             ShowNozzle = true;
         }

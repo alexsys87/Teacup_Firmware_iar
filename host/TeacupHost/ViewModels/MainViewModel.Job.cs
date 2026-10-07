@@ -6,6 +6,7 @@ using Microsoft.Win32;
 using TeacupHost.Core.GCode;
 using TeacupHost.Core.Printing;
 using TeacupHost.Infrastructure;
+using TeacupHost.Services;
 
 namespace TeacupHost.ViewModels;
 
@@ -40,7 +41,7 @@ public sealed partial class MainViewModel
     private IReadOnlyList<GCodeLineItem> _gcodeLines = [];
     public IReadOnlyList<GCodeLineItem> GCodeLines { get => _gcodeLines; private set => Set(ref _gcodeLines, value); }
 
-    private string _fileInfo = "Файл не открыт";
+    private string _fileInfo = Loc.T("S.NoFile");
     public string FileInfo { get => _fileInfo; private set => Set(ref _fileInfo, value); }
 
     private string _fileName = "";
@@ -78,8 +79,8 @@ public sealed partial class MainViewModel
     {
         var dlg = new OpenFileDialog
         {
-            Title = "Открыть G-код",
-            Filter = "G-код (*.gcode;*.gco;*.g;*.gc;*.nc)|*.gcode;*.gco;*.g;*.gc;*.nc|Все файлы (*.*)|*.*",
+            Title = Loc.T("S.OpenDialogTitle"),
+            Filter = Loc.T("S.OpenDialogFilter"),
             InitialDirectory = _settings.LastFolder ?? "",
         };
         if (dlg.ShowDialog() != true)
@@ -98,14 +99,14 @@ public sealed partial class MainViewModel
     }
 
     private Task LoadDemoAsync() =>
-        LoadAsync("demo.gcode", () => GCodeDocument.FromText("demo.gcode", DemoGCode.Generate()));
+        LoadAsync("cube10.gcode", () => GCodeDocument.FromText("cube10.gcode", DemoGCode.Generate()));
 
     private async Task LoadAsync(string name, Func<GCodeDocument> load)
     {
         StopSimulation();
         IsLoading = true;
         LoadProgress = 0;
-        FileInfo = $"Загрузка {name}…";
+        FileInfo = Loc.F("S.Loading", name);
         try
         {
             var progress = new Progress<double>(p => LoadProgress = p * 100);
@@ -120,12 +121,12 @@ public sealed partial class MainViewModel
                 return (d, t, lines);
             });
             SetDocument(doc, tp, items);
-            Log(LogKind.Info, $"Открыт {doc.Name}: {doc.Lines.Count} строк, {tp.Layers.Count} слоёв");
+            Log(LogKind.Info, Loc.F("S.Log.Opened", doc.Name, doc.Lines.Count, tp.Layers.Count));
         }
         catch (Exception ex)
         {
-            FileInfo = "Ошибка загрузки";
-            Notify("Не удалось открыть файл", ex.Message, NotifySeverity.Error);
+            FileInfo = Loc.T("S.LoadError");
+            Notify(Loc.T("S.Notice.OpenFailed"), ex.Message, NotifySeverity.Error);
         }
         finally
         {
@@ -141,15 +142,26 @@ public sealed partial class MainViewModel
         Toolpath = tp;
         FileName = doc.Name;
         UploadName = MakeShortName(doc.Name);
-        var size = tp.Max - tp.Min;
-        double grams = tp.FilamentLength * Math.PI * _settings.FilamentDiameter * _settings.FilamentDiameter / 4 * 1.24 / 1000;
-        FileInfo = $"{doc.Lines.Count:N0} строк · {tp.Layers.Count} слоёв · " +
-                   $"{size.X:0.#}×{size.Y:0.#}×{tp.Max.Z:0.##} мм\n" +
-                   $"Время ≈ {FormatTime(tp.TotalTime)} · филамент {tp.FilamentLength / 1000:0.##} м (≈{grams:0} г PLA)";
+        RebuildFileInfo();
         ViewerMode = ViewerMode.Preview;
         ShowAll();
         SimTime = 0;
         CurrentLine = -1;
+    }
+
+    private void RebuildFileInfo()
+    {
+        var doc = Document;
+        var tp = Toolpath;
+        if (doc == null || tp == null)
+        {
+            FileInfo = Loc.T("S.NoFile");
+            return;
+        }
+        var size = tp.Max - tp.Min;
+        double grams = tp.FilamentLength * Math.PI * _settings.FilamentDiameter * _settings.FilamentDiameter / 4 * 1.24 / 1000;
+        FileInfo = Loc.F("S.FileInfo", doc.Lines.Count, tp.Layers.Count, size.X, size.Y, tp.Max.Z,
+            FormatTime(tp.TotalTime), tp.FilamentLength / 1000, grams);
     }
 
     public static string FormatTime(double seconds)
@@ -195,9 +207,9 @@ public sealed partial class MainViewModel
 
     public string PrintSourceText => PrintSource switch
     {
-        PrintSource.Host => "Печать с компьютера",
-        PrintSource.Sd => "Печать с SD / флеш",
-        _ => IsUploading ? "Загрузка на SD / флеш" : "Нет задания",
+        PrintSource.Host => Loc.T("S.Source.Host"),
+        PrintSource.Sd => Loc.T("S.Source.Sd"),
+        _ => IsUploading ? Loc.T("S.Source.Upload") : Loc.T("S.Source.None"),
     };
 
     private bool _isPaused;
@@ -232,18 +244,18 @@ public sealed partial class MainViewModel
         var lines = MakeJobLines(doc);
         var longLine = lines.FirstOrDefault(l => l.Command.Length > 80);
         if (longLine.Command != null)
-            Log(LogKind.Warning, $"Строка {longLine.SourceLine + 1} длиннее 80 символов, прошивка может её отбросить");
+            Log(LogKind.Warning, Loc.F("S.Log.LongLine", longLine.SourceLine + 1));
         try
         {
             StopSimulation();
             _jobLines = lines;
             _conn.StartJob(lines);
             BeginLivePrint(PrintSource.Host);
-            Log(LogKind.Info, $"Печать {doc.Name} с компьютера: {lines.Count} команд");
+            Log(LogKind.Info, Loc.F("S.Log.HostPrintStarted", doc.Name, lines.Count));
         }
         catch (Exception ex)
         {
-            Notify("Печать не запущена", ex.Message, NotifySeverity.Error);
+            Notify(Loc.T("S.Notice.PrintNotStarted"), ex.Message, NotifySeverity.Error);
         }
     }
 
@@ -289,7 +301,7 @@ public sealed partial class MainViewModel
             return;
         IsPaused = true;
         _pauseStart = _clock.Elapsed.TotalSeconds;
-        Log(LogKind.Info, "Пауза");
+        Log(LogKind.Info, Loc.T("S.Log.Pause"));
     }
 
     private void Resume()
@@ -302,19 +314,19 @@ public sealed partial class MainViewModel
             return;
         IsPaused = false;
         _pausedTotal += _clock.Elapsed.TotalSeconds - _pauseStart;
-        Log(LogKind.Info, "Продолжение");
+        Log(LogKind.Info, Loc.T("S.Log.Resume"));
     }
 
     private void Stop()
     {
         if (IsUploading)
         {
-            if (MessageBox.Show("Прервать загрузку файла?", "Teacup Host", MessageBoxButton.YesNo,
+            if (MessageBox.Show(Loc.T("S.Ask.CancelUpload"), "Teacup Host", MessageBoxButton.YesNo,
                     MessageBoxImage.Question) == MessageBoxResult.Yes)
                 _conn.CancelJob();
             return;
         }
-        if (MessageBox.Show("Остановить печать?\nДвижение прервётся сразу (M410), нагреватели выключатся.",
+        if (MessageBox.Show(Loc.T("S.Ask.StopPrint"),
                 "Teacup Host", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         var source = PrintSource;
@@ -324,7 +336,7 @@ public sealed partial class MainViewModel
             _conn.SdStop();
         _conn.SendEmergency("M410");
         _conn.SendScript(_settings.CancelScript);
-        EndLivePrint("Печать остановлена");
+        EndLivePrint(Loc.T("S.Log.PrintStopped"));
     }
 
     private void OnJobCompleted(JobKind kind, bool cancelled)
@@ -340,9 +352,10 @@ public sealed partial class MainViewModel
         if (!cancelled)
         {
             PrintProgress = 100;
-            Notify("Печать завершена", $"{FileName} за {FormatTime(elapsed)}", NotifySeverity.Success);
+            Notify(Loc.T("S.Notice.PrintDone"), Loc.F("S.Notice.PrintDoneText", FileName, FormatTime(elapsed)),
+                NotifySeverity.Success);
         }
-        EndLivePrint(cancelled ? "Печать прервана" : $"Печать завершена за {FormatTime(elapsed)}");
+        EndLivePrint(cancelled ? Loc.T("S.Log.PrintCancelled") : Loc.F("S.Log.PrintDone", FormatTime(elapsed)));
     }
 
     private void OnJobAck(int index)
@@ -387,7 +400,8 @@ public sealed partial class MainViewModel
     private SdFileItem? _selectedSdFile;
     public SdFileItem? SelectedSdFile { get => _selectedSdFile; set => Set(ref _selectedSdFile, value); }
 
-    private string _sdStatus = "Список не получен";
+    private string _sdStatus = Loc.T("S.SdNotListed");
+    private bool _sdFilesReceived;
     public string SdStatus { get => _sdStatus; private set => Set(ref _sdStatus, value); }
 
     private string _sdPrintingFile = "";
@@ -413,7 +427,8 @@ public sealed partial class MainViewModel
         foreach (var f in files)
             SdFiles.Add(new SdFileItem(f.Name, f.Size));
         SelectedSdFile = SdFiles.FirstOrDefault(f => f.Name == selected) ?? SdFiles.FirstOrDefault();
-        SdStatus = files.Count == 0 ? "Файлов нет" : $"Файлов: {files.Count}";
+        _sdFilesReceived = true;
+        SdStatus = files.Count == 0 ? Loc.T("S.SdNoFiles") : Loc.F("S.SdFileCount", files.Count);
     }
 
     private void OnSdMessage(string msg)
@@ -425,8 +440,8 @@ public sealed partial class MainViewModel
             _conn.SdRefresh();
         if (msg.Contains("open failed", StringComparison.OrdinalIgnoreCase) && PrintSource == PrintSource.Sd)
         {
-            EndLivePrint("Файл не открылся: " + msg);
-            Notify("Печать с SD", msg, NotifySeverity.Error);
+            EndLivePrint(Loc.F("S.Log.SdOpenFailed", msg));
+            Notify(Loc.T("S.Notice.SdPrint"), msg, NotifySeverity.Error);
         }
     }
 
@@ -452,11 +467,11 @@ public sealed partial class MainViewModel
             {
                 _liveMap = new SdMap(doc, Toolpath, GCodeLines, doc.LineOffsets,
                     Enumerable.Range(0, doc.Lines.Count).ToArray());
-                Log(LogKind.Info, $"{file.Name}: показываю по открытому файлу {doc.Name} (размер совпадает)");
+                Log(LogKind.Info, Loc.F("S.Log.SdMatchedByOpenFile", file.Name, doc.Name));
             }
             else
             {
-                Log(LogKind.Info, $"{file.Name}: открытый файл другого размера, прогресс без отображения строк");
+                Log(LogKind.Info, Loc.F("S.Log.SdNoMatch", file.Name));
             }
         }
 
@@ -465,7 +480,7 @@ public sealed partial class MainViewModel
         BeginLivePrint(PrintSource.Sd);
         if (_liveMap == null)
             ShowNozzle = false;
-        Log(LogKind.Info, $"Печать с SD / флеш: {file.Name}");
+        Log(LogKind.Info, Loc.F("S.Log.SdPrintStarted", file.Name));
     }
 
     private void OnSdProgress(long pos, long size)
@@ -473,7 +488,7 @@ public sealed partial class MainViewModel
         if (PrintSource != PrintSource.Sd || size <= 0)
             return;
         PrintProgress = pos * 100.0 / size;
-        SdStatus = $"{SdPrintingFile}: {pos:N0} / {size:N0} байт";
+        SdStatus = Loc.F("S.SdProgress", SdPrintingFile, pos, size);
         var map = _liveMap;
         if (map == null || Toolpath != map.Tp)
             return;
@@ -491,8 +506,9 @@ public sealed partial class MainViewModel
         PrintProgress = 100;
         if (_liveMap != null && Toolpath != null)
             ShowAll();
-        Notify("Печать с SD завершена", $"{SdPrintingFile} за {FormatTime(elapsed)}", NotifySeverity.Success);
-        EndLivePrint($"Печать с SD завершена за {FormatTime(elapsed)}");
+        Notify(Loc.T("S.Notice.SdDone"), Loc.F("S.Notice.PrintDoneText", SdPrintingFile, FormatTime(elapsed)),
+            NotifySeverity.Success);
+        EndLivePrint(Loc.F("S.Log.SdDone", FormatTime(elapsed)));
     }
 
     // ---------------------------------------------------------------- upload
@@ -546,11 +562,11 @@ public sealed partial class MainViewModel
         string name = UploadName;
         if (!ShortName.IsMatch(name))
         {
-            Notify("Имя файла", "Нужно имя в формате 8.3 латиницей, например PART.GCO", NotifySeverity.Warning);
+            Notify(Loc.T("S.Notice.FileName"), Loc.T("S.Notice.FileNameText"), NotifySeverity.Warning);
             return;
         }
         if (SdFiles.Any(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) &&
-            MessageBox.Show($"Файл {name} уже есть на принтере. Заменить?", "Загрузка",
+            MessageBox.Show(Loc.F("S.Ask.ReplaceFile", name), Loc.T("S.Ask.UploadTitle"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         var lines = MakeJobLines(doc);
@@ -562,12 +578,12 @@ public sealed partial class MainViewModel
             UploadProgress = 0;
             IsUploading = true;
             _conn.StartJob(job, JobKind.Upload);
-            Log(LogKind.Info, $"Загрузка {doc.Name} → {name}: {lines.Count} строк");
+            Log(LogKind.Info, Loc.F("S.Log.UploadStarted", doc.Name, name, lines.Count));
         }
         catch (Exception ex)
         {
             IsUploading = false;
-            Notify("Загрузка не запущена", ex.Message, NotifySeverity.Error);
+            Notify(Loc.T("S.Notice.UploadNotStarted"), ex.Message, NotifySeverity.Error);
         }
     }
 
@@ -576,7 +592,7 @@ public sealed partial class MainViewModel
         IsUploading = false;
         if (cancelled || _uploadLines == null || Document == null || Toolpath == null)
         {
-            Log(LogKind.Warning, "Загрузка прервана");
+            Log(LogKind.Warning, Loc.T("S.Log.UploadCancelled"));
             _uploadLines = null;
             return;
         }
@@ -593,8 +609,8 @@ public sealed partial class MainViewModel
         _uploadMaps[_uploadingName] = new SdMap(Document, Toolpath, GCodeLines, offsets, docLines);
         _uploadLines = null;
         UploadProgress = 100;
-        Notify("Файл загружен", $"{_uploadingName}: {pos:N0} байт", NotifySeverity.Success);
-        Log(LogKind.Info, $"Файл {_uploadingName} загружен, {pos:N0} байт");
+        Notify(Loc.T("S.Notice.Uploaded"), Loc.F("S.Notice.UploadedText", _uploadingName, pos), NotifySeverity.Success);
+        Log(LogKind.Info, Loc.F("S.Log.Uploaded", _uploadingName, pos));
         _conn.SdRefresh();
     }
 
@@ -616,7 +632,7 @@ public sealed partial class MainViewModel
         SdDeleteCommand = new RelayCommand(() =>
         {
             var f = SelectedSdFile;
-            if (f != null && MessageBox.Show($"Удалить {f.Name} с принтера?", "SD / флеш",
+            if (f != null && MessageBox.Show(Loc.F("S.Ask.DeleteFile", f.Name), Loc.T("S.Ask.SdTitle"),
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 _conn.SdDelete(f.Name);
@@ -625,7 +641,7 @@ public sealed partial class MainViewModel
         }, () => IsOnline && SelectedSdFile != null && !IsPrinting && !IsUploading);
         SdFormatCommand = new RelayCommand(() =>
         {
-            if (MessageBox.Show("Удалить ВСЕ файлы из SPI flash (M9002)?\nНа SD-карте команда не работает.",
+            if (MessageBox.Show(Loc.T("S.Ask.FormatFlash"),
                     "SPI flash", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 _conn.Send("M9002");
@@ -645,6 +661,6 @@ public sealed class LegendItem
     }
 
     public FeatureType Type { get; }
-    public string Name => Controls.FeaturePalette.NameOf(Type);
+    public string Name => Loc.T("S.Feature." + Type);
     public System.Windows.Media.Brush Brush => Controls.FeaturePalette.BrushOf(Type);
 }

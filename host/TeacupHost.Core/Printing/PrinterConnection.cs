@@ -11,6 +11,30 @@ public enum ConnectionState
     Halted,
 }
 
+/// <summary>
+/// Messages of the connection itself. The UI turns them into text in its
+/// language; <c>Detail</c> carries the variable part (line number, error).
+/// </summary>
+public enum ConnectionMessage
+{
+    /// <summary>The first "ok" arrived.</summary>
+    Online,
+    /// <summary>The port failed (cable pulled); detail: the error.</summary>
+    LinkLost,
+    /// <summary>"Resend" for a line no longer in the history; detail: line number.</summary>
+    ResendNotInHistory,
+    /// <summary>"Resend" for a line never sent, numbering restarted; detail: line number.</summary>
+    ResendUnknownLine,
+    /// <summary>"start" from the printer.</summary>
+    PrinterReset,
+    /// <summary>"start" while printing: the print is lost.</summary>
+    PrinterResetDuringPrint,
+    /// <summary>No answer to M110, sending it again.</summary>
+    HandshakeRetry,
+    /// <summary>20 s of silence while waiting for "ok", resynchronising with M105.</summary>
+    OkTimeout,
+}
+
 public enum JobKind
 {
     /// <summary>Printing a file from this computer, line by line.</summary>
@@ -115,7 +139,7 @@ public sealed class PrinterConnection : IDisposable
     public event Action<string>? LineReceived;
     public event Action<string, SendKind>? LineSent;
     /// <summary>Messages of the connection itself (handshake, timeouts, errors).</summary>
-    public event Action<string>? Info;
+    public event Action<ConnectionMessage, string>? Info;
     public event Action<TemperatureReading>? TemperatureUpdated;
     public event Action<PrinterPosition>? PositionUpdated;
     public event Action? Busy;
@@ -163,7 +187,7 @@ public sealed class PrinterConnection : IDisposable
 
     public void Disconnect() => Disconnect(null);
 
-    private void Disconnect(string? reason)
+    private void Disconnect((ConnectionMessage Message, string Detail)? reason)
     {
         IPrinterTransport? t;
         lock (_lock)
@@ -179,8 +203,8 @@ public sealed class PrinterConnection : IDisposable
             AbortJob();
             _sdPrinting = false;
             ResetProtocol();
-            if (reason != null)
-                Info?.Invoke(reason);
+            if (reason is { } r)
+                Info?.Invoke(r.Message, r.Detail);
             SetState(ConnectionState.Disconnected);
         }
         try
@@ -195,7 +219,7 @@ public sealed class PrinterConnection : IDisposable
     }
 
     private void OnFaulted(Exception ex) =>
-        ThreadPool.QueueUserWorkItem(_ => Disconnect("Связь потеряна: " + ex.Message));
+        ThreadPool.QueueUserWorkItem(_ => Disconnect((ConnectionMessage.LinkLost, ex.Message)));
 
     private void ResetProtocol()
     {
@@ -232,7 +256,7 @@ public sealed class PrinterConnection : IDisposable
     private void OnOnline()
     {
         SetState(ConnectionState.Online);
-        Info?.Invoke("Принтер на связи");
+        Info?.Invoke(ConnectionMessage.Online, "");
         _priority.Enqueue(("M115", SendKind.Poll));
         if (TemperatureInterval > 0)
             _priority.Enqueue(($"M155 S{TemperatureInterval}", SendKind.Poll));
@@ -353,7 +377,7 @@ public sealed class PrinterConnection : IDisposable
                 return;
             }
             if (r < _nextLine)
-                Info?.Invoke($"Принтер просит строку {r}, её нет в истории");
+                Info?.Invoke(ConnectionMessage.ResendNotInHistory, r.ToString(System.Globalization.CultureInfo.InvariantCulture));
             _resendFrom = null;
         }
 
@@ -489,7 +513,7 @@ public sealed class PrinterConnection : IDisposable
     {
         if (n >= _nextLine || n < 0)
         {
-            Info?.Invoke($"Resend {n}: такой строки не было, нумерация сброшена");
+            Info?.Invoke(ConnectionMessage.ResendUnknownLine, n.ToString(System.Globalization.CultureInfo.InvariantCulture));
             // The printer lost track (reset?), start numbering again.
             _priority.Clear();
             SendHandshake();
@@ -515,7 +539,7 @@ public sealed class PrinterConnection : IDisposable
     private void OnPrinterReset()
     {
         bool hadJob = _job != null || _sdPrinting;
-        Info?.Invoke(hadJob ? "Принтер перезагрузился, печать прервана" : "Принтер перезагрузился");
+        Info?.Invoke(hadJob ? ConnectionMessage.PrinterResetDuringPrint : ConnectionMessage.PrinterReset, "");
         AbortJob();
         _sdPrinting = false;
         ResetProtocol();
@@ -590,7 +614,7 @@ public sealed class PrinterConnection : IDisposable
             {
                 if (now - _handshakeSentAt > 2.0)
                 {
-                    Info?.Invoke("Нет ответа, повтор M110");
+                    Info?.Invoke(ConnectionMessage.HandshakeRetry, "");
                     SendHandshake();
                 }
                 return;
@@ -617,7 +641,7 @@ public sealed class PrinterConnection : IDisposable
             // sends "busy" every 2 s during long commands, so it's really gone.
             if (_waitingSince >= 0 && now - _lastRx > 20 && now - _waitingSince > 20)
             {
-                Info?.Invoke("Нет ответа 20 с, повтор синхронизации (M105)");
+                Info?.Invoke(ConnectionMessage.OkTimeout, "");
                 _inFlight.Clear();
                 _inFlight.AddLast(new InFlight(-1, -1));
                 _waitingSince = -1;
@@ -636,9 +660,9 @@ public sealed class PrinterConnection : IDisposable
         lock (_lock)
         {
             if (_transport == null || State != ConnectionState.Online)
-                throw new InvalidOperationException("Принтер не подключён");
+                throw new InvalidOperationException("The printer is not connected");
             if (_job != null)
-                throw new InvalidOperationException("Уже выполняется задание");
+                throw new InvalidOperationException("A job is already running");
             _job = lines;
             _jobKind = kind;
             _jobNext = 0;

@@ -87,3 +87,15 @@ public sealed class IndexToVisibilityConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
+
+/// <summary>Port list item → shown name: the virtual printer in the current language.</summary>
+public sealed class PortNameConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object? parameter, CultureInfo culture) =>
+        value as string == ViewModels.MainViewModel.VirtualPortName
+            ? Services.Loc.T("S.VirtualPrinter")
+            : value ?? "";
+
+    public object ConvertBack(object value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}

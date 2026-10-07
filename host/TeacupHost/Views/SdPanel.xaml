@@ -12,12 +12,12 @@
 
         <ui:Card Style="{StaticResource PanelCard}">
             <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitle}" Text="SD-карта / SPI flash принтера" />
+                <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.SdTitle}" />
                 <WrapPanel>
-                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowSync24}" Content="Список (M20)"
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowSync24}" Content="{DynamicResource S.SdList}"
                                Command="{Binding SdRefreshCommand}" />
-                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Storage24}" Content="Подключить (M21)"
-                               Command="{Binding SdInitCommand}" ToolTip="Смонтировать карту после замены" />
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Storage24}" Content="{DynamicResource S.SdInit}"
+                               Command="{Binding SdInitCommand}" ToolTip="{DynamicResource S.SdInitTip}" />
                 </WrapPanel>
                 <TextBlock Style="{StaticResource Hint}" Text="{Binding SdStatus}" />
             </StackPanel>
@@ -48,24 +48,24 @@
             <StackPanel>
                 <WrapPanel>
                     <ui:Button Style="{StaticResource SmallButton}" Appearance="Primary" Icon="{ui:SymbolIcon Play24}"
-                               Content="Печать" Command="{Binding SdPrintCommand}" ToolTip="M23 имя, M24" />
-                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Pause24}" Content="Пауза"
+                               Content="{DynamicResource S.TabPrint}" Command="{Binding SdPrintCommand}" ToolTip="{DynamicResource S.SdPrintTip}" />
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Pause24}" Content="{DynamicResource S.Pause}"
                                Command="{Binding PauseCommand}" ToolTip="M25" />
-                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon PlayCircle24}" Content="Продолжить"
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon PlayCircle24}" Content="{DynamicResource S.Resume}"
                                Command="{Binding ResumeCommand}" ToolTip="M24" />
                     <ui:Button Style="{StaticResource SmallButton}" Appearance="Danger" Icon="{ui:SymbolIcon Stop24}"
-                               Content="Стоп" Command="{Binding StopCommand}" />
+                               Content="{DynamicResource S.Stop}" Command="{Binding StopCommand}" />
                 </WrapPanel>
                 <WrapPanel>
-                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Delete24}" Content="Удалить (M30)"
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Delete24}" Content="{DynamicResource S.SdDelete}"
                                Command="{Binding SdDeleteCommand}" />
                     <ui:Button Style="{StaticResource SmallButton}" Appearance="Caution" Icon="{ui:SymbolIcon Delete24}"
-                               Content="Очистить flash (M9002)" Command="{Binding SdFormatCommand}" />
+                               Content="{DynamicResource S.SdFormat}" Command="{Binding SdFormatCommand}" />
                 </WrapPanel>
                 <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="100" Value="{Binding PrintProgress, Mode=OneWay}"
                              Visibility="{Binding IsPrinting, Converter={StaticResource BoolToVisibility}}" />
                 <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
-                           Text="Во время печати с SD программа опрашивает M27 и показывает текущую строку — для файлов, загруженных из этой программы, или если открыт тот же файл (совпадает размер)." />
+                           Text="{DynamicResource S.SdHint}" />
             </StackPanel>
         </ui:Card>
     </Grid>

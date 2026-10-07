@@ -10,6 +10,9 @@
             <ResourceDictionary.MergedDictionaries>
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
+                <!-- Replaced at run time by Loc.Apply() and ThemeService.Apply(). -->
+                <ResourceDictionary Source="Resources/Strings.ru.xaml" />
+                <ResourceDictionary Source="Resources/Theme.Dark.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <inf:BoolToVisibilityConverter x:Key="BoolToVisibility" />
@@ -19,6 +22,7 @@
             <inf:EqualsConverter x:Key="EqualsConverter" />
             <inf:TemperatureConverter x:Key="Temperature" />
             <inf:IndexToVisibilityConverter x:Key="IndexToVisibility" />
+            <inf:PortNameConverter x:Key="PortName" />
 
             <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, Courier New</FontFamily>
 

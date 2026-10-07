@@ -33,7 +33,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     protected override void OnClosing(CancelEventArgs e)
     {
         if (_vm.IsPrinting && _vm.PrintSource == PrintSource.Host &&
-            MessageBox.Show("Идёт печать с компьютера. Если закрыть программу, печать остановится.\nЗакрыть?",
+            MessageBox.Show(Services.Loc.T("S.Ask.CloseWhilePrinting"),
                 "Teacup Host", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
             e.Cancel = true;

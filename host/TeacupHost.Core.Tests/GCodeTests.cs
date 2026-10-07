@@ -169,15 +169,36 @@ public class GCodeTests
     }
 
     [Fact]
-    public void DemoPrintHasLayersAndFeatures()
+    public void CalibrationCubeIsTenMillimetres()
     {
-        var doc = GCodeDocument.FromText("demo", DemoGCode.Generate());
+        var doc = GCodeDocument.FromText("cube", DemoGCode.Generate());
         var tp = ToolpathBuilder.Build(doc.Lines);
         Assert.Equal(50, tp.Layers.Count);
         Assert.Contains(tp.Segments, s => s.Feature == FeatureType.OuterWall);
         Assert.Contains(tp.Segments, s => s.Feature == FeatureType.Infill);
         Assert.Contains(tp.Segments, s => s.Feature == FeatureType.TopSolid);
+        Assert.Contains(tp.Segments, s => s.Feature == FeatureType.Skirt);
+
+        // The outer surface of the walls is the 10 mm cube centred on the bed.
+        var walls = tp.Segments.Where(s => s.Feature == FeatureType.OuterWall).ToArray();
+        float minX = walls.Min(s => Math.Min(s.Start.X, s.End.X)) - 0.225f;
+        float maxX = walls.Max(s => Math.Max(s.Start.X, s.End.X)) + 0.225f;
+        float minY = walls.Min(s => Math.Min(s.Start.Y, s.End.Y)) - 0.225f;
+        float maxY = walls.Max(s => Math.Max(s.Start.Y, s.End.Y)) + 0.225f;
+        Assert.Equal(105f, minX, 3);
+        Assert.Equal(115f, maxX, 3);
+        Assert.Equal(85f, minY, 3);
+        Assert.Equal(95f, maxY, 3);
+        Assert.Equal(10f, tp.Layers[^1].Z, 3);
+
+        // Infill stays inside the walls.
+        foreach (var s in tp.Segments.Where(s => s.Feature is FeatureType.Infill or FeatureType.SolidInfill or FeatureType.TopSolid))
+        {
+            Assert.InRange(s.End.X, 105.5f, 114.5f);
+            Assert.InRange(s.End.Y, 85.5f, 94.5f);
+        }
         Assert.True(tp.TotalTime > 60);
+
         // Layers cover all segments without gaps.
         int next = 0;
         foreach (var l in tp.Layers)

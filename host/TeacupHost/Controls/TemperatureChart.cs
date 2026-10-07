@@ -44,8 +44,6 @@ public sealed class TemperatureChart : FrameworkElement
     public static readonly Color HotendColor = Color.FromRgb(0xFF, 0x70, 0x43);
     public static readonly Color BedColor = Color.FromRgb(0x42, 0xA5, 0xF5);
 
-    private static readonly Pen GridPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)), 1));
-    private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x9E, 0xA7, 0xB3)));
     private static readonly Pen HotendPen = Frozen(new Pen(new SolidColorBrush(HotendColor), 2));
     private static readonly Pen BedPen = Frozen(new Pen(new SolidColorBrush(BedColor), 2));
     private static readonly Pen HotendTargetPen = Frozen(new Pen(new SolidColorBrush(HotendColor), 1) { DashStyle = DashStyles.Dash });
@@ -57,8 +55,15 @@ public sealed class TemperatureChart : FrameworkElement
         return f;
     }
 
+    public TemperatureChart()
+    {
+        ViewColors.Follow(this, InvalidateVisual);
+    }
+
     protected override void OnRender(DrawingContext dc)
     {
+        var gridPen = new Pen(ViewColors.Brush(ViewColors.ChartGrid), 1);
+        var labelBrush = ViewColors.Brush(ViewColors.Text);
         double w = ActualWidth, h = ActualHeight;
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
         if (w < 60 || h < 40)
@@ -89,16 +94,16 @@ public sealed class TemperatureChart : FrameworkElement
         for (double v = 0; v <= max + 0.1; v += step)
         {
             double y = top + ph - v / max * ph;
-            dc.DrawLine(GridPen, new Point(left, y), new Point(left + pw, y));
+            dc.DrawLine(gridPen, new Point(left, y), new Point(left + pw, y));
             var ft = new FormattedText(v.ToString("0", CultureInfo.InvariantCulture), CultureInfo.CurrentCulture,
-                FlowDirection.LeftToRight, typeface, 10, LabelBrush, dpi);
+                FlowDirection.LeftToRight, typeface, 10, labelBrush, dpi);
             dc.DrawText(ft, new Point(left - ft.Width - 4, y - ft.Height / 2));
         }
         for (int m = 0; m <= (int)(Span / 60); m++)
         {
             double x = left + pw - m * 60 / Span * pw;
-            var ft = new FormattedText(m == 0 ? "сейчас" : $"-{m} мин", CultureInfo.CurrentCulture,
-                FlowDirection.LeftToRight, typeface, 10, LabelBrush, dpi);
+            var ft = new FormattedText(m == 0 ? Services.Loc.T("S.ChartNow") : Services.Loc.F("S.ChartMinutes", m), CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, typeface, 10, labelBrush, dpi);
             dc.DrawText(ft, new Point(Math.Max(left, x - ft.Width / 2 - (m == 0 ? ft.Width / 2 : 0)), top + ph + 2));
         }
 
