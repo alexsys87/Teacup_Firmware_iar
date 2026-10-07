@@ -26,6 +26,7 @@ public interface IPrinterTransport : IDisposable
 public sealed class SerialPortTransport : IPrinterTransport
 {
     private readonly SerialPort _port;
+    private Stream? _stream;
     private Thread? _reader;
     private volatile bool _running;
     private readonly object _writeLock = new();
@@ -68,6 +69,11 @@ public sealed class SerialPortTransport : IPrinterTransport
     public void Open()
     {
         _port.Open();
+        // When a USB serial device is unplugged, the finalizer of the port's
+        // stream can throw on the finalizer thread and end the process. The
+        // stream is closed explicitly in Close() instead.
+        _stream = _port.BaseStream;
+        GC.SuppressFinalize(_stream);
         _port.DiscardInBuffer();
         _port.DiscardOutBuffer();
         _running = true;
@@ -151,6 +157,14 @@ public sealed class SerialPortTransport : IPrinterTransport
         _running = false;
         try
         {
+            _stream?.Close();
+        }
+        catch
+        {
+            // Port already gone (USB unplugged).
+        }
+        try
+        {
             if (_port.IsOpen)
                 _port.Close();
         }
@@ -158,6 +172,7 @@ public sealed class SerialPortTransport : IPrinterTransport
         {
             // Port already gone (USB unplugged).
         }
+        _stream = null;
         _reader?.Join(1000);
         _reader = null;
     }

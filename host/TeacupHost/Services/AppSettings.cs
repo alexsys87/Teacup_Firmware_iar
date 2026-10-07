@@ -15,6 +15,9 @@ public sealed class AppSettings
     public string? Port { get; set; }
     public int BaudRate { get; set; } = 115200;
     public double VirtualTimeScale { get; set; } = 10;
+    /// <summary>Telnet / TCP serial bridge, "host" or "host:port".</summary>
+    public string NetworkAddress { get; set; } = "192.168.1.100:23";
+    public bool AutoReconnect { get; set; } = true;
 
     // Printer geometry, printer.p3steel.h: X_MAX, Y_MAX, Z_MAX.
     public double BedWidth { get; set; } = 220;

@@ -74,7 +74,11 @@
                     <ComboBox Width="110" Margin="6,0,0,0" ItemsSource="{Binding BaudRates}"
                               SelectedItem="{Binding SelectedBaud}" IsEnabled="{Binding IsDisconnected}"
                               ToolTip="{DynamicResource S.BaudTip}"
-                              Visibility="{Binding IsVirtualSelected, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                              Visibility="{Binding IsSerialSelected, Converter={StaticResource BoolToVisibility}}" />
+                    <ui:TextBox Width="190" Margin="6,0,0,0" Text="{Binding NetworkAddress, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="192.168.1.100:23" IsEnabled="{Binding IsDisconnected}"
+                                ToolTip="{DynamicResource S.AddressTip}" ClearButtonEnabled="False"
+                                Visibility="{Binding IsNetworkSelected, Converter={StaticResource BoolToVisibility}}" />
                     <StackPanel Orientation="Horizontal" Margin="6,0,0,0"
                                 Visibility="{Binding IsVirtualSelected, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Style="{StaticResource Label}" Text="×" Margin="0,0,4,0" />
@@ -105,6 +109,9 @@
                                     <DataTrigger Binding="{Binding ConnectionState}" Value="Halted">
                                         <Setter Property="Background" Value="#66EF4444" />
                                     </DataTrigger>
+                                    <DataTrigger Binding="{Binding ConnectionState}" Value="Reconnecting">
+                                        <Setter Property="Background" Value="#55F97316" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
@@ -122,6 +129,9 @@
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding ConnectionState}" Value="Halted">
                                                 <Setter Property="Fill" Value="#EF4444" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding ConnectionState}" Value="Reconnecting">
+                                                <Setter Property="Fill" Value="#F97316" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>

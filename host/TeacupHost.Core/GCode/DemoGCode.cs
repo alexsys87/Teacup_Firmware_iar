@@ -4,9 +4,9 @@ using System.Text;
 namespace TeacupHost.Core.GCode;
 
 /// <summary>
-/// Generates the classic calibration cube (10 × 10 × 10 mm by default):
-/// skirt, two perimeters, four solid bottom and top layers and 20 % sparse
-/// infill at ±45°. Used by the virtual printer and to try out the viewer
+/// Generates a test cube (100 × 100 × 100 mm by default, any size by the
+/// arguments): skirt, two perimeters, four solid bottom and top layers and
+/// 20 % sparse infill at ±45°. Used by the virtual printer and to try out the viewer
 /// without a slicer. Comments follow PrusaSlicer (";TYPE:", ";LAYER_CHANGE").
 /// </summary>
 public static class DemoGCode
@@ -15,15 +15,15 @@ public static class DemoGCode
     private const double Width = 0.45;
     private const int SolidLayers = 4;
 
-    public static string Generate(double centerX = 110, double centerY = 90, double size = 10,
-        double height = 10, double layerHeight = 0.2)
+    public static string Generate(double centerX = 110, double centerY = 90, double size = 100,
+        double height = 100, double layerHeight = 0.2)
     {
         var g = new Writer(layerHeight);
         int layers = Math.Max(1, (int)Math.Round(height / layerHeight));
         double half = size / 2;
         double x0 = centerX - half, y0 = centerY - half, x1 = centerX + half, y1 = centerY + half;
 
-        g.Line($"; Teacup Host calibration cube {g.F(size)} x {g.F(size)} x {g.F(height)} mm");
+        g.Line($"; Teacup Host test cube {g.F(size)} x {g.F(size)} x {g.F(height)} mm");
         g.Line($"; layer height {g.F(layerHeight)} mm, 2 perimeters, {SolidLayers} solid layers, 20% infill");
         g.Line("M140 S60");
         g.Line("M104 S205");
@@ -82,7 +82,7 @@ public static class DemoGCode
         g.Line("M104 S0");
         g.Line("M140 S0");
         g.Line("M84");
-        g.Line("; end of calibration cube");
+        g.Line("; end of test cube");
         return g.ToString();
     }
 

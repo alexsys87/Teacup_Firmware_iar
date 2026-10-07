@@ -5,6 +5,15 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
         <StackPanel>
+            <!-- Connection -->
+            <ui:Card Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.ConnectionTitle}" />
+                    <CheckBox Content="{DynamicResource S.AutoReconnect}" IsChecked="{Binding AutoReconnect}" MinWidth="0" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="{DynamicResource S.AutoReconnectHint}" />
+                </StackPanel>
+            </ui:Card>
+
             <!-- Diagnostics -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>

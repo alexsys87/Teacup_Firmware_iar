@@ -12,7 +12,7 @@
     <sys:String x:Key="S.EStop">СТОП (M112)</sys:String>
     <sys:String x:Key="S.EStopTip">Аварийный останов: нагреватели и моторы выключаются сразу. Дальше — M999</sys:String>
     <sys:String x:Key="S.Cube">Куб</sys:String>
-    <sys:String x:Key="S.CubeTip">Открыть тестовый куб 10 мм</sys:String>
+    <sys:String x:Key="S.CubeTip">Открыть тестовый куб 10 × 10 × 10 см</sys:String>
     <sys:String x:Key="S.Open">Открыть</sys:String>
     <sys:String x:Key="S.HotendChip" xml:space="preserve">Хотэнд </sys:String>
     <sys:String x:Key="S.BedChip" xml:space="preserve">Стол </sys:String>
@@ -65,7 +65,7 @@
     <sys:String x:Key="S.ListingTip">Щелчок по строке — симуляция до этой строки</sys:String>
     <sys:String x:Key="S.File">Файл</sys:String>
     <sys:String x:Key="S.OpenEllipsis">Открыть…</sys:String>
-    <sys:String x:Key="S.CubeModel">Тестовый куб 10 мм</sys:String>
+    <sys:String x:Key="S.CubeModel">Тестовый куб 10 см</sys:String>
     <sys:String x:Key="S.DropHint">Файл можно перетащить в окно мышью.</sys:String>
     <sys:String x:Key="S.HostPrintTitle">Печать с компьютера (COM-порт)</sys:String>
     <sys:String x:Key="S.Print">Печать</sys:String>
@@ -148,10 +148,16 @@
     <sys:String x:Key="S.PowerLabel" xml:space="preserve">нагрев </sys:String>
     <sys:String x:Key="S.TargetLabel" xml:space="preserve">цель </sys:String>
     <sys:String x:Key="S.VirtualPrinter">Виртуальный принтер</sys:String>
+    <sys:String x:Key="S.NetworkPort">Сеть (Telnet)</sys:String>
+    <sys:String x:Key="S.AddressTip">Адрес моста Telnet (ESP3D, ser2net, WiFi-UART): IP или имя, порт через двоеточие, по умолчанию 23</sys:String>
+    <sys:String x:Key="S.ConnectionTitle">Подключение</sys:String>
+    <sys:String x:Key="S.AutoReconnect">Переподключаться автоматически</sys:String>
+    <sys:String x:Key="S.AutoReconnectHint">Если COM-порт пропал (кабель, перезапуск USB) или оборвалась сеть, программа раз в секунду открывает соединение заново. Печать с компьютера ждёт и продолжается с той строки, на которой остановилась: нумерация строк прошивки показывает, что принтер уже получил. Если за время обрыва принтер запарковался (HOST_WATCH: USB пропал дольше 2 с при пустой очереди) или перезапустился, печать останавливается — продолжить её нельзя. Если 15 с от принтера нет ни строки, соединение тоже открывается заново.</sys:String>
     <sys:String x:Key="S.State.Disconnected">Не подключено</sys:String>
     <sys:String x:Key="S.State.Connecting">Подключение…</sys:String>
     <sys:String x:Key="S.State.Online">На связи · {0}</sys:String>
     <sys:String x:Key="S.State.Halted">ОСТАНОВЛЕН (M999)</sys:String>
+    <sys:String x:Key="S.State.Reconnecting">Нет связи — переподключение…</sys:String>
     <sys:String x:Key="S.Conn.Online">Принтер на связи</sys:String>
     <sys:String x:Key="S.Conn.LinkLost">Связь потеряна: {0}</sys:String>
     <sys:String x:Key="S.Conn.ResendNotInHistory">Принтер просит строку {0}, её нет в истории</sys:String>
@@ -160,10 +166,21 @@
     <sys:String x:Key="S.Conn.PrinterResetDuringPrint">Принтер перезагрузился, печать прервана</sys:String>
     <sys:String x:Key="S.Conn.HandshakeRetry">Нет ответа, повтор M110</sys:String>
     <sys:String x:Key="S.Conn.OkTimeout">Нет ответа 20 с, повтор синхронизации (M105)</sys:String>
+    <sys:String x:Key="S.Conn.LinkTimeout">От принтера ничего нет {0} с, соединение открывается заново</sys:String>
+    <sys:String x:Key="S.Conn.Reconnected">Связь восстановлена</sys:String>
+    <sys:String x:Key="S.Conn.JobResumed">Печать продолжается, следующая строка N{0}</sys:String>
+    <sys:String x:Key="S.Conn.HostLostDuringOutage">Пока не было связи, принтер запарковался или перезапустился (цель хотэнда снизилась). Печать остановлена, продолжить её нельзя.</sys:String>
     <sys:String x:Key="S.Log.Connecting">Подключение к {0}, {1} бод</sys:String>
+    <sys:String x:Key="S.Log.ConnectingNetwork">Подключение к {0}:{1} по сети (Telnet)</sys:String>
     <sys:String x:Key="S.Log.ConnectingVirtual">Подключение к виртуальному принтеру (ускорение ×{0:0})</sys:String>
     <sys:String x:Key="S.Log.PortFailed">Не удалось открыть порт: {0}</sys:String>
     <sys:String x:Key="S.Notice.ConnectFailed">Ошибка подключения</sys:String>
+    <sys:String x:Key="S.Notice.AddressEmpty">Укажите адрес моста Telnet, например 192.168.1.100:23</sys:String>
+    <sys:String x:Key="S.Notice.LinkLost">Связь потеряна</sys:String>
+    <sys:String x:Key="S.Notice.LinkLostText">Переподключение… Соединение откроется само, когда порт или сеть вернутся.</sys:String>
+    <sys:String x:Key="S.Notice.LinkLostPrinting">Печать ждёт связи и продолжится сама. Если USB пропал дольше 2 с, прошивка может запарковать принтер — тогда печать остановится.</sys:String>
+    <sys:String x:Key="S.Notice.LinkRestored">Связь восстановлена</sys:String>
+    <sys:String x:Key="S.Notice.PrintAborted">Печать остановлена</sys:String>
     <sys:String x:Key="S.Ask.DisconnectWhilePrinting">Идёт печать. Отключиться от принтера?</sys:String>
     <sys:String x:Key="S.Log.SdLostOnDisconnect">Связь потеряна, печать с SD продолжается на принтере без контроля</sys:String>
     <sys:String x:Key="S.Log.Disconnected">Отключено</sys:String>
