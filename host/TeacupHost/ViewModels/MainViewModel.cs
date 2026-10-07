@@ -16,7 +16,8 @@ namespace TeacupHost.ViewModels;
 /// </summary>
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
-    public const string VirtualPortName = "Виртуальный принтер";
+    /// <summary>Item of the port list that stands for the virtual printer (shown localized).</summary>
+    public const string VirtualPortName = "\u0001virtual";
     private const int MaxLogEntries = 3000;
 
     private readonly AppSettings _settings;
@@ -31,7 +32,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _settings = settings;
         _dispatcher = Application.Current.Dispatcher;
 
-        foreach (var m in settings.Macros)
+        _isDarkTheme = ThemeService.IsDark;
+        foreach (var m in settings.Macros ?? DefaultMacros())
             Macros.Add(new MacroItem(m.Name, m.Script));
         _selectedBaud = settings.BaudRate;
         _hotendSetpoint = settings.HotendSetpoint;
@@ -44,6 +46,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         HookConnection();
         CreateCommands();
+        Loc.Changed += OnLanguageChanged;
         RefreshPorts();
         _selectedPort = settings.Port != null && Ports.Contains(settings.Port) ? settings.Port : Ports.FirstOrDefault();
 
@@ -56,6 +59,64 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public AppSettings Settings => _settings;
+
+    // ---------------------------------------------------------------- theme and language
+
+    private bool _isDarkTheme;
+    public bool IsDarkTheme
+    {
+        get => _isDarkTheme;
+        set
+        {
+            if (!Set(ref _isDarkTheme, value))
+                return;
+            ThemeService.Apply(value);
+            _settings.DarkTheme = value;
+        }
+    }
+
+    /// <summary>Code of the current language for the toolbar button, "RU" or "EN".</summary>
+    public string LanguageCode => Loc.Language.ToUpperInvariant();
+
+    public RelayCommand ToggleThemeCommand { get; private set; } = null!;
+    public RelayCommand ToggleLanguageCommand { get; private set; } = null!;
+
+    private void ToggleLanguage()
+    {
+        Loc.Apply(Loc.Language == Loc.Russian ? Loc.English : Loc.Russian);
+        _settings.Language = Loc.Language;
+    }
+
+    /// <summary>Texts built in code follow the new language.</summary>
+    private void OnLanguageChanged()
+    {
+        RefreshPorts();
+        RebuildFileInfo();
+        // File sizes are formatted when the items are made.
+        var selected = SelectedSdFile?.Name;
+        var files = SdFiles.Select(f => new SdFileItem(f.Name, f.Size)).ToList();
+        SdFiles.Clear();
+        foreach (var f in files)
+            SdFiles.Add(f);
+        SelectedSdFile = SdFiles.FirstOrDefault(f => f.Name == selected);
+        if (_sdFilesReceived)
+            SdStatus = SdFiles.Count == 0 ? Loc.T("S.SdNoFiles") : Loc.F("S.SdFileCount", SdFiles.Count);
+        else
+            SdStatus = Loc.T("S.SdNotListed");
+        // Refresh every computed text (connection, mode, legend, line numbers …).
+        OnPropertyChanged(string.Empty);
+    }
+
+    private static IEnumerable<MacroSettings> DefaultMacros() => new MacroSettings[]
+    {
+        new() { Name = Loc.T("S.Macro.PreheatPla"), Script = "M104 S205\nM140 S60" },
+        new() { Name = Loc.T("S.Macro.PreheatPetg"), Script = "M104 S240\nM140 S80" },
+        new() { Name = Loc.T("S.Macro.Cooldown"), Script = "M104 S0\nM140 S0" },
+        new() { Name = Loc.T("S.Macro.Park"), Script = "G91\nG1 Z10 F240\nG90\nG1 X10 Y170 F6000" },
+        new() { Name = Loc.T("S.Macro.BedLevel"), Script = "G28\nG29" },
+        new() { Name = Loc.T("S.Macro.FilamentChange"), Script = "M600" },
+        new() { Name = Loc.T("S.Macro.Stats"), Script = "M78" },
+    };
 
     // ---------------------------------------------------------------- connection
 
@@ -116,10 +177,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public string ConnectionText => ConnectionState switch
     {
-        ConnectionState.Disconnected => "Не подключено",
-        ConnectionState.Connecting => "Подключение…",
-        ConnectionState.Online => $"На связи · {_conn.PortName}",
-        ConnectionState.Halted => "ОСТАНОВЛЕН (M999)",
+        ConnectionState.Disconnected => Loc.T("S.State.Disconnected"),
+        ConnectionState.Connecting => Loc.T("S.State.Connecting"),
+        ConnectionState.Online => Loc.F("S.State.Online",
+            _conn.PortName == "Virtual printer" ? Loc.T("S.VirtualPrinter") : _conn.PortName ?? ""),
+        ConnectionState.Halted => Loc.T("S.State.Halted"),
         _ => "",
     };
 
@@ -153,23 +215,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             IPrinterTransport transport = SelectedPort == VirtualPortName
                 ? new VirtualPrinter { TimeScale = VirtualTimeScale }
                 : new SerialPortTransport(SelectedPort, SelectedBaud);
-            Log(LogKind.Info, $"Подключение к {transport.Name}" +
-                              (transport is VirtualPrinter ? $" (ускорение ×{VirtualTimeScale:0})" : $", {SelectedBaud} бод"));
+            Log(LogKind.Info, transport is VirtualPrinter
+                ? Loc.F("S.Log.ConnectingVirtual", VirtualTimeScale)
+                : Loc.F("S.Log.Connecting", transport.Name, SelectedBaud));
             _conn.Connect(transport);
             _settings.Port = SelectedPort;
             _settings.BaudRate = SelectedBaud;
         }
         catch (Exception ex)
         {
-            Log(LogKind.Error, "Не удалось открыть порт: " + ex.Message);
-            Notify("Ошибка подключения", ex.Message, NotifySeverity.Error);
+            Log(LogKind.Error, Loc.F("S.Log.PortFailed", ex.Message));
+            Notify(Loc.T("S.Notice.ConnectFailed"), ex.Message, NotifySeverity.Error);
         }
     }
 
     private void Disconnect()
     {
         if (PrintSource != PrintSource.None &&
-            MessageBox.Show("Идёт печать. Отключиться от принтера?", "Teacup Host",
+            MessageBox.Show(Loc.T("S.Ask.DisconnectWhilePrinting"), "Teacup Host",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         _conn.Disconnect();
@@ -180,7 +243,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _conn.StateChanged += s => Ui(() => OnStateChanged(s));
         _conn.LineReceived += OnLineReceived;
         _conn.LineSent += OnLineSent;
-        _conn.Info += msg => _pendingLog.Enqueue(new LogEntry(LogKind.Info, msg));
+        _conn.Info += (msg, detail) =>
+            _pendingLog.Enqueue(new LogEntry(LogKind.Info, Loc.F("S.Conn." + msg, detail)));
         _conn.TemperatureUpdated += t => Ui(() => OnTemperature(t));
         _conn.PositionUpdated += p => Ui(() => OnPosition(p));
         _conn.PrinterError += e => Ui(() => OnPrinterError(e));
@@ -192,7 +256,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Interlocked.Exchange(ref _pendingSdSize, s);
             Interlocked.Exchange(ref _pendingSdPos, p);
         };
-        _conn.SdFileSelected += (name, size) => Ui(() => SdStatus = $"Выбран файл {name}, {size} байт");
+        _conn.SdFileSelected += (name, size) => Ui(() => SdStatus = Loc.F("S.SdSelected", name, size));
         _conn.SdMessage += msg => Ui(() => OnSdMessage(msg));
         _conn.SdPrintFinished += () => Ui(OnSdPrintFinished);
     }
@@ -206,10 +270,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (s == ConnectionState.Disconnected)
         {
             if (PrintSource == PrintSource.Sd)
-                EndLivePrint("Связь потеряна, печать с SD продолжается на принтере без контроля");
+                EndLivePrint(Loc.T("S.Log.SdLostOnDisconnect"));
             HotendTarget = BedTarget = 0;
             FirmwareName = "";
-            Log(LogKind.Info, "Отключено");
+            Log(LogKind.Info, Loc.T("S.Log.Disconnected"));
         }
         else if (s == ConnectionState.Online && old != ConnectionState.Online)
         {
@@ -218,9 +282,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         else if (s == ConnectionState.Halted)
         {
             if (PrintSource == PrintSource.Sd)
-                EndLivePrint("Принтер остановлен");
-            Notify("Принтер остановлен", "Прошивка вызвала kill(). Устраните причину и нажмите «Сброс (M999)».",
-                NotifySeverity.Error);
+                EndLivePrint(Loc.T("S.Log.PrinterHalted"));
+            Notify(Loc.T("S.Notice.Halted"), Loc.T("S.Notice.HaltedText"), NotifySeverity.Error);
         }
         OnPropertyChanged(nameof(CanControl));
     }
@@ -228,7 +291,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnPrinterError(string e)
     {
         if (ResponseParser.IsFatalError(e))
-            Notify("Ошибка принтера", e, NotifySeverity.Error);
+            Notify(Loc.T("S.Notice.PrinterError"), e, NotifySeverity.Error);
     }
 
     // ---------------------------------------------------------------- notifications
@@ -460,6 +523,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshPortsCommand = new RelayCommand(RefreshPorts, () => IsDisconnected);
         ConnectCommand = new RelayCommand(Connect, () => IsDisconnected && SelectedPort != null);
         DisconnectCommand = new RelayCommand(Disconnect, () => IsConnected);
+        ToggleThemeCommand = new RelayCommand(() => IsDarkTheme = !IsDarkTheme);
+        ToggleLanguageCommand = new RelayCommand(ToggleLanguage);
         SendConsoleCommand = new RelayCommand(SendConsole, () => IsConnected);
         ClearConsoleCommand = new RelayCommand(() => LogEntries.Clear());
         CreateMachineCommands();
@@ -481,6 +546,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        Loc.Changed -= OnLanguageChanged;
         _pump.Stop();
         _conn.Dispose();
     }

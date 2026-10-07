@@ -141,7 +141,7 @@ internal static class ToolpathMesh
     {
         var mesh = new MeshGeometry3D();
         const int n = 16;
-        const double r = 1.6, h = 3.0, bodyR = 3.2, bodyH = 6.0;
+        const double r = 0.9, h = 1.8, bodyR = 2.0, bodyH = 3.5;
         mesh.Positions.Add(new Point3D(0, 0, 0));
         for (int i = 0; i < n; i++)
         {

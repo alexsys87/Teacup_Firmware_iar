@@ -10,15 +10,13 @@
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
                     <DockPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Хотэнд" Foreground="#FFAB91" />
-                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"
-                                   Text="{Binding HotendPower, StringFormat=нагрев {0}%}" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Hotend}" Foreground="{DynamicResource HotendTextBrush}" />
+                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"><Run Text="{DynamicResource S.PowerLabel}" /><Run Text="{Binding HotendPower, Mode=OneWay}" /><Run Text="%" /></TextBlock>
                     </DockPanel>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Style="{StaticResource BigValue}" FontSize="30"
                                    Text="{Binding HotendTemp, Converter={StaticResource Temperature}}" />
-                        <TextBlock Margin="8,0,0,4" VerticalAlignment="Bottom" Style="{StaticResource Label}"
-                                   Text="{Binding HotendTarget, StringFormat=цель {0:0}°}" />
+                        <TextBlock Margin="8,0,0,4" VerticalAlignment="Bottom" Style="{StaticResource Label}"><Run Text="{DynamicResource S.TargetLabel}" /><Run Text="{Binding HotendTarget, StringFormat={}{0:0}°, Mode=OneWay}" /></TextBlock>
                     </StackPanel>
                     <Grid Margin="0,8,0,0" IsEnabled="{Binding IsOnline}">
                         <Grid.ColumnDefinitions>
@@ -29,9 +27,9 @@
                         <ui:NumberBox Value="{Binding HotendSetpoint, Mode=TwoWay}" Minimum="0" Maximum="300" SmallChange="5"
                                       MaxDecimalPlaces="0" ClearButtonEnabled="False" SpinButtonPlacementMode="Inline" />
                         <ui:Button Grid.Column="1" Margin="6,0,0,0" Appearance="Primary" Icon="{ui:SymbolIcon Fire24}"
-                                   Content="Нагреть" Command="{Binding SetHotendCommand}" ToolTip="M104 S" />
+                                   Content="{DynamicResource S.Heat}" Command="{Binding SetHotendCommand}" ToolTip="M104 S" />
                         <ui:Button Grid.Column="2" Margin="6,0,0,0" Icon="{ui:SymbolIcon WeatherSnowflake24}"
-                                   Content="Выкл" Command="{Binding HotendOffCommand}" ToolTip="M104 S0" />
+                                   Content="{DynamicResource S.Off}" Command="{Binding HotendOffCommand}" ToolTip="M104 S0" />
                     </Grid>
                     <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding HotendPresets}" IsEnabled="{Binding IsOnline}">
                         <ItemsControl.ItemsPanel>
@@ -54,15 +52,13 @@
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
                     <DockPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="Стол" Foreground="#90CAF9" />
-                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"
-                                   Text="{Binding BedPower, StringFormat=нагрев {0}%}" />
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Bed}" Foreground="{DynamicResource BedTextBrush}" />
+                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"><Run Text="{DynamicResource S.PowerLabel}" /><Run Text="{Binding BedPower, Mode=OneWay}" /><Run Text="%" /></TextBlock>
                     </DockPanel>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Style="{StaticResource BigValue}" FontSize="30"
                                    Text="{Binding BedTemp, Converter={StaticResource Temperature}}" />
-                        <TextBlock Margin="8,0,0,4" VerticalAlignment="Bottom" Style="{StaticResource Label}"
-                                   Text="{Binding BedTarget, StringFormat=цель {0:0}°}" />
+                        <TextBlock Margin="8,0,0,4" VerticalAlignment="Bottom" Style="{StaticResource Label}"><Run Text="{DynamicResource S.TargetLabel}" /><Run Text="{Binding BedTarget, StringFormat={}{0:0}°, Mode=OneWay}" /></TextBlock>
                     </StackPanel>
                     <Grid Margin="0,8,0,0" IsEnabled="{Binding IsOnline}">
                         <Grid.ColumnDefinitions>
@@ -73,9 +69,9 @@
                         <ui:NumberBox Value="{Binding BedSetpoint, Mode=TwoWay}" Minimum="0" Maximum="150" SmallChange="5"
                                       MaxDecimalPlaces="0" ClearButtonEnabled="False" SpinButtonPlacementMode="Inline" />
                         <ui:Button Grid.Column="1" Margin="6,0,0,0" Appearance="Primary" Icon="{ui:SymbolIcon Fire24}"
-                                   Content="Нагреть" Command="{Binding SetBedCommand}" ToolTip="M140 S" />
+                                   Content="{DynamicResource S.Heat}" Command="{Binding SetBedCommand}" ToolTip="M140 S" />
                         <ui:Button Grid.Column="2" Margin="6,0,0,0" Icon="{ui:SymbolIcon WeatherSnowflake24}"
-                                   Content="Выкл" Command="{Binding BedOffCommand}" ToolTip="M140 S0" />
+                                   Content="{DynamicResource S.Off}" Command="{Binding BedOffCommand}" ToolTip="M140 S0" />
                     </Grid>
                     <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding BedPresets}" IsEnabled="{Binding IsOnline}">
                         <ItemsControl.ItemsPanel>
@@ -97,24 +93,24 @@
             <!-- Chart -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="График за 5 минут" />
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Chart5Min}" />
                     <c:TemperatureChart Height="200" Samples="{Binding TemperatureSamples}" Revision="{Binding TemperatureRevision}" />
                     <StackPanel Orientation="Horizontal" Margin="34,6,0,0">
                         <Rectangle Width="14" Height="3" Fill="#FF7043" VerticalAlignment="Center" />
-                        <TextBlock Style="{StaticResource Label}" Text=" хотэнд   " />
+                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.ChartHotend}" />
                         <Rectangle Width="14" Height="3" Fill="#42A5F5" VerticalAlignment="Center" />
-                        <TextBlock Style="{StaticResource Label}" Text=" стол   " />
-                        <TextBlock Style="{StaticResource Label}" Text="- - - цель" />
+                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.ChartBed}" />
+                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.ChartTarget}" />
                     </StackPanel>
                 </StackPanel>
             </ui:Card>
 
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="Ожидание нагрева" />
-                    <ui:Button Icon="{ui:SymbolIcon Dismiss24}" Content="Не ждать (M108)" Command="{Binding CancelWaitCommand}" />
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.WaitTitle}" />
+                    <ui:Button Icon="{ui:SymbolIcon Dismiss24}" Content="{DynamicResource S.CancelWait}" Command="{Binding CancelWaitCommand}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
-                               Text="Прерывает M109 / M190 / M116 сразу, через аварийный парсер прошивки." />
+                               Text="{DynamicResource S.CancelWaitHint}" />
                 </StackPanel>
             </ui:Card>
         </StackPanel>

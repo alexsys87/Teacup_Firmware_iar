@@ -60,9 +60,9 @@ public sealed class SdFileItem
     public long Size { get; }
     public string SizeText => Size switch
     {
-        < 1024 => $"{Size} Б",
-        < 1024 * 1024 => $"{Size / 1024.0:0.#} КБ",
-        _ => $"{Size / 1024.0 / 1024.0:0.##} МБ",
+        < 1024 => Services.Loc.F("S.SizeB", Size),
+        < 1024 * 1024 => Services.Loc.F("S.SizeKB", Size / 1024.0),
+        _ => Services.Loc.F("S.SizeMB", Size / 1024.0 / 1024.0),
     };
 }
 

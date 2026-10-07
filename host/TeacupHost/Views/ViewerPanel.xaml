@@ -10,7 +10,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border CornerRadius="8" ClipToBounds="True" Background="#1C1E22"
+        <Border CornerRadius="8" ClipToBounds="True" Background="{DynamicResource ViewerBackgroundBrush}"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -32,16 +32,16 @@
                                                 FilamentDiameter="{Binding FilamentDiameter}" />
                             <!-- View presets -->
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Изо" Click="OnIso" ToolTip="Изометрия" />
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Сверху" Click="OnTop" />
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Спереди" Click="OnFront" />
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Стол" Click="OnBed" ToolTip="Показать весь стол" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.ViewIso}" Click="OnIso" ToolTip="{DynamicResource S.ViewIsoTip}" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.ViewTop}" Click="OnTop" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.ViewFront}" Click="OnFront" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.Bed}" Click="OnBed" ToolTip="{DynamicResource S.ViewBedTip}" />
                                 <ui:Button Padding="8,4" Margin="2,0" Icon="{ui:SymbolIcon ArrowReset24}" Click="OnReset"
-                                           ToolTip="Сбросить вид (двойной щелчок)" />
+                                           ToolTip="{DynamicResource S.ViewResetTip}" />
                             </StackPanel>
                             <TextBlock HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="10,0,10,8" FontSize="11"
-                                       Foreground="#80FFFFFF"
-                                       Text="ЛКМ — вращение · ПКМ / Shift+ЛКМ — сдвиг · колесо — масштаб" />
+                                       Foreground="{DynamicResource OverlayDimTextBrush}"
+                                       Text="{DynamicResource S.MouseHint}" />
                         </Grid>
                         <Grid Visibility="{Binding SelectedIndex, ElementName=ViewTabs, Converter={StaticResource IndexToVisibility}, ConverterParameter=1}">
                             <c:LayerView x:Name="View2D"
@@ -54,8 +54,8 @@
                                          BedWidth="{Binding BedWidth}"
                                          BedDepth="{Binding BedDepth}" />
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Модель" Click="OnFitModel" />
-                                <ui:Button Padding="8,4" Margin="2,0" Content="Стол" Click="OnFitBed" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.FitModel}" Click="OnFitModel" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="{DynamicResource S.Bed}" Click="OnFitBed" />
                             </StackPanel>
                         </Grid>
                     <!-- View switch and mode badge -->
@@ -70,14 +70,14 @@
                             <ListBoxItem>
                                 <StackPanel Orientation="Horizontal">
                                     <ui:SymbolIcon Symbol="Layer24" Margin="0,0,4,0" />
-                                    <TextBlock Text="Слой" VerticalAlignment="Center" />
+                                    <TextBlock Text="{DynamicResource S.Layer}" VerticalAlignment="Center" />
                                 </StackPanel>
                             </ListBoxItem>
                         </ListBox>
                         <Border Margin="10,0,0,0" Padding="8,3" CornerRadius="4" VerticalAlignment="Center">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="Background" Value="#33FFFFFF" />
+                                    <Setter Property="Background" Value="{DynamicResource ModeBadgeBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding ViewerMode}" Value="Simulation">
                                             <Setter Property="Background" Value="#CC7C3AED" />
@@ -88,7 +88,21 @@
                                     </Style.Triggers>
                                 </Style>
                             </Border.Style>
-                            <TextBlock Text="{Binding ModeText}" FontSize="11" FontWeight="Bold" Foreground="White" />
+                            <TextBlock Text="{Binding ModeText}" FontSize="11" FontWeight="Bold">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource ModeBadgeTextBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ViewerMode}" Value="Simulation">
+                                                <Setter Property="Foreground" Value="White" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding ViewerMode}" Value="Live">
+                                                <Setter Property="Foreground" Value="White" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Border>
                     </StackPanel>
                 </Grid>
@@ -106,23 +120,23 @@
                                 <StackPanel Orientation="Horizontal" Margin="0,0,10,2">
                                     <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2" Fill="{Binding Brush}"
                                                VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding Name}" FontSize="11" Margin="4,0,0,0" Foreground="#C0FFFFFF" />
+                                    <TextBlock Text="{Binding Name}" FontSize="11" Margin="4,0,0,0" Foreground="{DynamicResource OverlayTextBrush}" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <CheckBox Content="Холостые перемещения" IsChecked="{Binding ShowTravel}" FontSize="12" MinWidth="0" />
+                    <CheckBox Content="{DynamicResource S.ShowTravel}" IsChecked="{Binding ShowTravel}" FontSize="12" MinWidth="0" />
                 </StackPanel>
 
 
                 <!-- Current command overlay -->
                 <Border HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,56,0,0" Padding="12,6"
-                        CornerRadius="6" Background="#B0101214" MaxWidth="640"
+                        CornerRadius="6" Background="{DynamicResource OverlayBackgroundBrush}" MaxWidth="640"
                         Visibility="{Binding CurrentLineText, Converter={StaticResource NullToVisibility}}">
                     <StackPanel>
                         <TextBlock Text="{Binding CurrentLineText}" FontFamily="{StaticResource MonoFont}" FontSize="16"
-                                   FontWeight="SemiBold" Foreground="#60CDFF" TextTrimming="CharacterEllipsis" />
-                        <TextBlock FontSize="11" Foreground="#B0FFFFFF">
+                                   FontWeight="SemiBold" Foreground="{DynamicResource CommandTextBrush}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock FontSize="11" Foreground="{DynamicResource OverlayTextBrush}">
                             <Run Text="{Binding CurrentLineNumberText, Mode=OneWay}" />
                             <Run Text="   " />
                             <Run Text="{Binding NozzleText, Mode=OneWay}" />
@@ -137,13 +151,13 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="Слой" HorizontalAlignment="Center" FontSize="11" Foreground="#A0FFFFFF" />
+                    <TextBlock Text="{DynamicResource S.Layer}" HorizontalAlignment="Center" FontSize="11" Foreground="{DynamicResource OverlayTextBrush}" />
                     <Slider Grid.Row="1" Orientation="Vertical" HorizontalAlignment="Center" Margin="0,6"
                             Minimum="0" Maximum="{Binding LayerSliderMax}" Value="{Binding MaxLayer}"
                             IsSnapToTickEnabled="True" TickFrequency="1" SmallChange="1" LargeChange="10"
                             IsEnabled="{Binding IsLive, Converter={StaticResource InverseBool}}" />
                     <TextBlock Grid.Row="2" Text="{Binding LayerText}" FontSize="10" TextWrapping="Wrap" TextAlignment="Center"
-                               Foreground="#C0FFFFFF" />
+                               Foreground="{DynamicResource OverlayTextBrush}" />
                 </Grid>
             </Grid>
         </Border>
@@ -161,11 +175,11 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal">
                     <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Rewind24}" Command="{Binding SimLayerBackCommand}"
-                               ToolTip="Предыдущий слой" />
+                               ToolTip="{DynamicResource S.PrevLayerTip}" />
                     <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Previous24}" Command="{Binding SimStepBackCommand}"
-                               ToolTip="Предыдущее перемещение" />
+                               ToolTip="{DynamicResource S.PrevMoveTip}" />
                     <ui:Button Padding="7" Margin="0,0,2,0" Appearance="Primary" Command="{Binding SimPlayPauseCommand}"
-                               ToolTip="Симуляция: старт / пауза">
+                               ToolTip="{DynamicResource S.PlayTip}">
                         <Grid>
                             <ui:SymbolIcon Symbol="Play24"
                                            Visibility="{Binding SimPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
@@ -174,18 +188,18 @@
                         </Grid>
                     </ui:Button>
                     <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Next24}" Command="{Binding SimStepForwardCommand}"
-                               ToolTip="Следующее перемещение" />
+                               ToolTip="{DynamicResource S.NextMoveTip}" />
                     <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon FastForward24}" Command="{Binding SimLayerForwardCommand}"
-                               ToolTip="Следующий слой" />
+                               ToolTip="{DynamicResource S.NextLayerTip}" />
                     <ui:Button Padding="7" Margin="0,0,8,0" Icon="{ui:SymbolIcon Stop24}" Command="{Binding SimStopCommand}"
-                               ToolTip="Закончить симуляцию" />
+                               ToolTip="{DynamicResource S.StopSimTip}" />
                 </StackPanel>
                 <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding SimTotal}"
-                        Value="{Binding SimTime}" ToolTip="Время печати (оценка)" />
+                        Value="{Binding SimTime}" ToolTip="{DynamicResource S.SimTimeTip}" />
                 <TextBlock Grid.Column="2" Margin="10,0" VerticalAlignment="Center" FontFamily="{StaticResource MonoFont}"
                            FontSize="12" Text="{Binding SimTimeText}" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal">
-                    <TextBlock Style="{StaticResource Label}" Text="Скорость ×" Margin="0,0,4,0" />
+                    <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.SpeedX}" Margin="0,0,4,0" />
                     <ComboBox Width="90" ItemsSource="{Binding SimSpeeds}" SelectedItem="{Binding SimSpeed}" />
                 </StackPanel>
             </Grid>

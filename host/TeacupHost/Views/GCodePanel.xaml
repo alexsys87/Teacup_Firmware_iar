@@ -14,13 +14,13 @@
             </Grid.RowDefinitions>
             <DockPanel Margin="0,0,0,6">
                 <ui:SymbolIcon Symbol="Code24" Margin="0,0,6,0" />
-                <TextBlock Text="G-код" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{DynamicResource S.GCode}" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"
                            Text="{Binding CurrentLineNumberText}" />
             </DockPanel>
 
             <!-- The command being executed, big -->
-            <Border Grid.Row="1" Margin="0,0,0,6" Padding="10,6" CornerRadius="6" Background="#1A60CDFF"
+            <Border Grid.Row="1" Margin="0,0,0,6" Padding="10,6" CornerRadius="6" Background="{DynamicResource CurrentLineBackgroundBrush}"
                     Visibility="{Binding CurrentLineText, Converter={StaticResource NullToVisibility}}">
                 <TextBlock Text="{Binding CurrentLineText}" FontFamily="{StaticResource MonoFont}" FontSize="15"
                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
@@ -33,7 +33,7 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
                      FontFamily="{StaticResource MonoFont}" FontSize="12" Background="Transparent"
                      SelectionChanged="OnSelectionChanged"
-                     ToolTip="Щелчок по строке — симуляция до этой строки">
+                     ToolTip="{DynamicResource S.ListingTip}">
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
                         <VirtualizingStackPanel />
@@ -54,10 +54,10 @@
                             <TextBlock Text="{Binding Text}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                        <!-- Foreground comes from the item: it changes on selection. -->
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsComment}" Value="True">
-                                                <Setter Property="Foreground" Value="#6A9955" />
+                                                <Setter Property="Foreground" Value="{DynamicResource CommentTextBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>

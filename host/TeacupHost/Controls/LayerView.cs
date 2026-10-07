@@ -119,13 +119,6 @@ public sealed class LayerView : FrameworkElement
     private StreamGeometry? _belowGeometry;
     private int _shownLayer = -1;
 
-    private static readonly Brush Background = Freeze(new SolidColorBrush(Color.FromRgb(0x1C, 0x1E, 0x22)));
-    private static readonly Brush BedBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x26, 0x29, 0x2E)));
-    private static readonly Brush GridBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x34, 0x38, 0x3E)));
-    private static readonly Brush GridMajorBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x4A, 0x50, 0x58)));
-    private static readonly Brush BelowBrush = Freeze(new SolidColorBrush(Color.FromArgb(0x60, 0x9E, 0xA7, 0xB3)));
-    private static readonly Brush TextBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x9E, 0xA7, 0xB3)));
-
     private static T Freeze<T>(T f) where T : Freezable
     {
         f.Freeze();
@@ -136,6 +129,7 @@ public sealed class LayerView : FrameworkElement
     {
         ClipToBounds = true;
         Focusable = true;
+        ViewColors.Follow(this, InvalidateVisual);
     }
 
     public void FitBed()
@@ -327,7 +321,8 @@ public sealed class LayerView : FrameworkElement
             _fitModelPending = false;
             FitModelCore();
         }
-        dc.DrawRectangle(Background, null, new Rect(RenderSize));
+        var textBrush = ViewColors.Brush(ViewColors.Text);
+        dc.DrawRectangle(ViewColors.Brush(ViewColors.Background), null, new Rect(RenderSize));
         UpdateCache();
 
         var world = new MatrixTransform(_scale, 0, 0, -_scale, _offset.X, _offset.Y);
@@ -335,9 +330,9 @@ public sealed class LayerView : FrameworkElement
         double px = 1 / _scale;                 // One pixel in mm.
 
         dc.PushTransform(world);
-        dc.DrawRectangle(BedBrush, null, new Rect(0, 0, BedWidth, BedDepth));
-        var minor = new Pen(GridBrush, px);
-        var major = new Pen(GridMajorBrush, px * 1.5);
+        dc.DrawRectangle(ViewColors.Brush(ViewColors.Bed), null, new Rect(0, 0, BedWidth, BedDepth));
+        var minor = new Pen(ViewColors.Brush(ViewColors.Grid), px);
+        var major = new Pen(ViewColors.Brush(ViewColors.GridMajor), px * 1.5);
         for (int x = 0; x <= (int)BedWidth; x += 10)
             dc.DrawLine(x % 50 == 0 ? major : minor, new Point(x, 0), new Point(x, BedDepth));
         for (int y = 0; y <= (int)BedDepth; y += 10)
@@ -345,7 +340,7 @@ public sealed class LayerView : FrameworkElement
 
         double width = Math.Max(ToolpathMesh.DefaultWidth, px);
         if (_belowGeometry != null)
-            dc.DrawGeometry(null, new Pen(BelowBrush, width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, _belowGeometry);
+            dc.DrawGeometry(null, new Pen(ViewColors.Brush(ViewColors.Below), width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, _belowGeometry);
         for (int f = 0; f < _featureGeometry.Length; f++)
         {
             var g = _featureGeometry[f];
@@ -372,7 +367,7 @@ public sealed class LayerView : FrameworkElement
         if (ShowNozzle)
         {
             var p = world.Transform(new Point(NozzlePosition.X, NozzlePosition.Y));
-            var ring = new Pen(Brushes.White, 1.5);
+            var ring = new Pen(ViewColors.Brush(ViewColors.Nozzle), 1.5);
             dc.DrawEllipse(null, ring, p, 7, 7);
             dc.DrawLine(ring, new Point(p.X - 11, p.Y), new Point(p.X - 4, p.Y));
             dc.DrawLine(ring, new Point(p.X + 4, p.Y), new Point(p.X + 11, p.Y));
@@ -385,9 +380,8 @@ public sealed class LayerView : FrameworkElement
         {
             var l = tp.Layers[_shownLayer];
             var text = new FormattedText(
-                string.Format(CultureInfo.CurrentCulture, "Слой {0} / {1}   Z = {2:0.###} мм   h = {3:0.###} мм",
-                    _shownLayer + 1, tp.Layers.Count, l.Z, l.Height),
-                CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 12, TextBrush,
+                Services.Loc.F("S.LayerInfo", _shownLayer + 1, tp.Layers.Count, l.Z, l.Height),
+                CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 12, textBrush,
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
             // Bottom right: the top is taken by the view switch and the current command.
             dc.DrawText(text, new Point(Math.Max(10, ActualWidth - text.Width - 12), ActualHeight - text.Height - 10));

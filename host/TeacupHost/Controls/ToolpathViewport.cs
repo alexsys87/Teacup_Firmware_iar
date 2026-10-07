@@ -186,6 +186,7 @@ public sealed class ToolpathViewport : Border
 
         BuildBed();
         ResetView();
+        ViewColors.Follow(this, BuildBed);
     }
 
     // ---------------------------------------------------------------- camera
@@ -309,7 +310,7 @@ public sealed class ToolpathViewport : Border
 
         var plate = new MeshGeometry3D();
         ToolpathMesh.AddLine(plate, 0, d / 2, w, d / 2, -0.06, d);
-        var plateMat = ToolpathMesh.Solid(Color.FromRgb(0x26, 0x29, 0x2E));
+        var plateMat = ToolpathMesh.Solid(ViewColors.Bed);
         _bedGroup.Children.Add(new GeometryModel3D(plate, plateMat) { BackMaterial = plateMat });
 
         var minor = new MeshGeometry3D();
@@ -323,8 +324,8 @@ public sealed class ToolpathViewport : Border
         ToolpathMesh.AddLine(major, w, 0, w, d, -0.01, 0.8);
         ToolpathMesh.AddLine(major, w, d, 0, d, -0.01, 0.8);
         ToolpathMesh.AddLine(major, 0, d, 0, 0, -0.01, 0.8);
-        _bedGroup.Children.Add(new GeometryModel3D(minor, ToolpathMesh.Solid(Color.FromRgb(0x38, 0x3C, 0x42))));
-        _bedGroup.Children.Add(new GeometryModel3D(major, ToolpathMesh.Solid(Color.FromRgb(0x50, 0x56, 0x5E))));
+        _bedGroup.Children.Add(new GeometryModel3D(minor, ToolpathMesh.Solid(ViewColors.Grid)));
+        _bedGroup.Children.Add(new GeometryModel3D(major, ToolpathMesh.Solid(ViewColors.GridMajor)));
 
         // Axes at the origin: X red, Y green, Z blue.
         AddAxis(new Point3D(0, -0.6, 0), new Point3D(25, 0.6, 1.2), Color.FromRgb(0xE5, 0x39, 0x35));

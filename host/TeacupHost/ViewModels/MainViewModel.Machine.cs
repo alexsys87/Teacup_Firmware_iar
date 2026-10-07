@@ -4,6 +4,7 @@ using System.Windows;
 using TeacupHost.Controls;
 using TeacupHost.Core.Printing;
 using TeacupHost.Infrastructure;
+using TeacupHost.Services;
 
 namespace TeacupHost.ViewModels;
 
@@ -214,17 +215,16 @@ public sealed partial class MainViewModel
         }, _ => IsOnline);
         PidTuneCommand = new RelayCommand(() =>
         {
-            if (MessageBox.Show($"Запустить автоподбор PID хотэнда на {N(HotendSetpoint)} °C (M303, 8 циклов)?\n" +
-                                "Хотэнд будет нагреваться и остывать несколько минут.",
-                    "Автоподбор PID", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+            if (MessageBox.Show(Loc.F("S.Ask.PidTune", N(HotendSetpoint)),
+                    Loc.T("S.Ask.PidTuneTitle"), MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
                 _conn.Send($"M303 E0 S{N(HotendSetpoint)} C8");
         }, Control);
         EmergencyStopCommand = new RelayCommand(() =>
         {
             _conn.SendEmergency("M112");
             if (PrintSource != PrintSource.None)
-                EndLivePrint("Аварийный останов");
-            Log(LogKind.Error, "Аварийный останов (M112)");
+                EndLivePrint(Loc.T("S.Log.EmergencyStop"));
+            Log(LogKind.Error, Loc.T("S.Log.EmergencyStop"));
         }, () => IsConnected);
         ResetCommand = new RelayCommand(() => _conn.Send("M999"), () => IsConnected);
         QuickStopCommand = new RelayCommand(() => _conn.SendEmergency("M410"), () => IsConnected);
@@ -234,13 +234,13 @@ public sealed partial class MainViewModel
         {
             if (p is MacroItem m)
             {
-                Log(LogKind.Info, $"Макрос «{m.Name}»");
+                Log(LogKind.Info, Loc.F("S.Log.Macro", m.Name));
                 _conn.SendScript(m.Script);
             }
         }, _ => IsOnline);
         AddMacroCommand = new RelayCommand(() =>
         {
-            var m = new MacroItem("Новый макрос", "M105");
+            var m = new MacroItem(Loc.T("S.NewMacro"), "M105");
             Macros.Add(m);
             SelectedMacro = m;
         });
@@ -269,8 +269,8 @@ public sealed partial class MainViewModel
     private void Extrude(double length)
     {
         if (HotendTemp < 170 &&
-            MessageBox.Show($"Хотэнд холодный ({HotendTemp:0} °C). Прошивка может запретить холодную экструзию.\nВсё равно отправить?",
-                "Экструдер", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            MessageBox.Show(Loc.F("S.Ask.ColdExtrude", HotendTemp),
+                Loc.T("S.Ask.ColdExtrudeTitle"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         _conn.Send("G91");
         _conn.Send($"G1 E{N(length)} F{N(ExtrudeFeed)}");

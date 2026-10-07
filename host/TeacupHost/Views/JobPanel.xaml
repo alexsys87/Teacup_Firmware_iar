@@ -8,7 +8,7 @@
             <!-- File -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="Файл" />
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.File}" />
                     <TextBlock Text="{Binding FileName}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                Visibility="{Binding FileName, Converter={StaticResource NullToVisibility}}" />
                     <TextBlock Style="{StaticResource Hint}" Text="{Binding FileInfo}" Margin="0,4,0,8" />
@@ -16,27 +16,27 @@
                                  Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}" />
                     <WrapPanel>
                         <ui:Button Style="{StaticResource SmallButton}" Appearance="Secondary"
-                                   Icon="{ui:SymbolIcon FolderOpen24}" Content="Открыть…" Command="{Binding OpenFileCommand}" />
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Cube24}" Content="Демо-модель"
+                                   Icon="{ui:SymbolIcon FolderOpen24}" Content="{DynamicResource S.OpenEllipsis}" Command="{Binding OpenFileCommand}" />
+                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Cube24}" Content="{DynamicResource S.CubeModel}"
                                    Command="{Binding OpenDemoCommand}" />
                     </WrapPanel>
-                    <TextBlock Style="{StaticResource Hint}" Text="Файл можно перетащить в окно мышью." />
+                    <TextBlock Style="{StaticResource Hint}" Text="{DynamicResource S.DropHint}" />
                 </StackPanel>
             </ui:Card>
 
             <!-- Print from PC -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="Печать с компьютера (COM-порт)" />
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.HostPrintTitle}" />
                     <WrapPanel>
                         <ui:Button Style="{StaticResource SmallButton}" Appearance="Primary" Icon="{ui:SymbolIcon Play24}"
-                                   Content="Печать" Command="{Binding StartPrintCommand}" />
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Pause24}" Content="Пауза"
+                                   Content="{DynamicResource S.TabPrint}" Command="{Binding StartPrintCommand}" />
+                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Pause24}" Content="{DynamicResource S.Pause}"
                                    Command="{Binding PauseCommand}" />
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon PlayCircle24}" Content="Продолжить"
+                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon PlayCircle24}" Content="{DynamicResource S.Resume}"
                                    Command="{Binding ResumeCommand}" />
                         <ui:Button Style="{StaticResource SmallButton}" Appearance="Danger" Icon="{ui:SymbolIcon Stop24}"
-                                   Content="Стоп" Command="{Binding StopCommand}" />
+                                   Content="{DynamicResource S.Stop}" Command="{Binding StopCommand}" />
                     </WrapPanel>
                     <Grid Margin="0,4,0,0" Visibility="{Binding IsPrinting, Converter={StaticResource BoolToVisibility}}">
                         <Grid.RowDefinitions>
@@ -49,21 +49,21 @@
                             <Run Text="·" />
                             <Run Text="{Binding PrintProgress, StringFormat={}{0:0.0}%, Mode=OneWay}" />
                             <LineBreak />
-                            <Run Text="Прошло" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <Run Text="{DynamicResource S.Elapsed}" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             <Run Text="{Binding ElapsedText, Mode=OneWay}" />
-                            <Run Text="  Осталось" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <Run Text="{DynamicResource S.RemainingCap}" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             <Run Text="{Binding RemainingText, Mode=OneWay}" />
                         </TextBlock>
                     </Grid>
                     <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
-                               Text="Строки уходят с номерами и контрольными суммами; ошибочные принтер запрашивает снова (Resend). Пауза и стоп работают и для печати с SD." />
+                               Text="{DynamicResource S.HostPrintHint}" />
                 </StackPanel>
             </ui:Card>
 
             <!-- Upload -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="Загрузить на SD / SPI flash" />
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.UploadTitle}" />
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -71,13 +71,13 @@
                         </Grid.ColumnDefinitions>
                         <ui:TextBox Text="{Binding UploadName, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="PART.GCO"
                                     CharacterCasing="Upper" MaxLength="12" FontFamily="{StaticResource MonoFont}" />
-                        <ui:Button Grid.Column="1" Margin="6,0,0,0" Icon="{ui:SymbolIcon ArrowUpload24}" Content="Загрузить"
+                        <ui:Button Grid.Column="1" Margin="6,0,0,0" Icon="{ui:SymbolIcon ArrowUpload24}" Content="{DynamicResource S.Upload}"
                                    Command="{Binding UploadCommand}" />
                     </Grid>
                     <ProgressBar Height="6" Margin="0,8,0,0" Minimum="0" Maximum="100" Value="{Binding UploadProgress, Mode=OneWay}"
                                  Visibility="{Binding IsUploading, Converter={StaticResource BoolToVisibility}}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
-                               Text="M28 ИМЯ … M29, как «Upload to SD» в Pronterface. Имя в формате 8.3. Комментарии не передаются. Работает с файлами в SPI flash; на SD-карту прошивка не пишет (Petit FatFs только читает)." />
+                               Text="{DynamicResource S.UploadHint}" />
                 </StackPanel>
             </ui:Card>
         </StackPanel>

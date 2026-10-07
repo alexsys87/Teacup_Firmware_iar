@@ -38,16 +38,12 @@ public sealed class AppSettings
     public bool ShowJobLines { get; set; }
     public string? LastFolder { get; set; }
 
-    public List<MacroSettings> Macros { get; set; } = new()
-    {
-        new() { Name = "Прогрев PLA", Script = "M104 S205\nM140 S60" },
-        new() { Name = "Прогрев PETG", Script = "M104 S240\nM140 S80" },
-        new() { Name = "Остудить", Script = "M104 S0\nM140 S0" },
-        new() { Name = "Парковка", Script = "G91\nG1 Z10 F240\nG90\nG1 X10 Y170 F6000" },
-        new() { Name = "Сетка стола", Script = "G28\nG29" },
-        new() { Name = "Смена филамента", Script = "M600" },
-        new() { Name = "Статистика", Script = "M78" },
-    };
+    /// <summary>"ru" or "en"; null: the system language.</summary>
+    public string? Language { get; set; }
+    public bool DarkTheme { get; set; } = true;
+
+    /// <summary>Null until saved once: the program fills in defaults in the current language.</summary>
+    public List<MacroSettings>? Macros { get; set; }
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TeacupHost", "settings.json");

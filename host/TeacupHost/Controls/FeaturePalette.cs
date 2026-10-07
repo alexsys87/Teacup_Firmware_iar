@@ -25,22 +25,6 @@ public static class FeaturePalette
         Color.FromRgb(0x42, 0xA5, 0xF5),   // Travel
     };
 
-    private static readonly string[] Names =
-    {
-        "Экструзия",
-        "Внешний периметр",
-        "Периметр",
-        "Заполнение",
-        "Сплошное заполнение",
-        "Верхний слой",
-        "Мост",
-        "Заполнение щелей",
-        "Поддержка",
-        "Юбка / кайма",
-        "Прочее",
-        "Холостой ход",
-    };
-
     private static readonly SolidColorBrush[] Brushes = Colors.Select(c =>
     {
         var b = new SolidColorBrush(c);
@@ -50,7 +34,7 @@ public static class FeaturePalette
 
     public static Color ColorOf(FeatureType f) => Colors[(int)f];
     public static SolidColorBrush BrushOf(FeatureType f) => Brushes[(int)f];
-    public static string NameOf(FeatureType f) => Names[(int)f];
+    public static string NameOf(FeatureType f) => Services.Loc.T("S.Feature." + f);
 
     /// <summary>U texture coordinate that picks the color of a type from <see cref="CreateTexture"/>.</summary>
     public static double TextureU(FeatureType f) => ((int)f + 0.5) / Count;

@@ -4,134 +4,184 @@ using System.Text;
 namespace TeacupHost.Core.GCode;
 
 /// <summary>
-/// Generates a small test print (a hollow rounded box with infill bottom)
-/// for the virtual printer and for trying out the viewer without a slicer.
+/// Generates the classic calibration cube (10 × 10 × 10 mm by default):
+/// skirt, two perimeters, four solid bottom and top layers and 20 % sparse
+/// infill at ±45°. Used by the virtual printer and to try out the viewer
+/// without a slicer. Comments follow PrusaSlicer (";TYPE:", ";LAYER_CHANGE").
 /// </summary>
 public static class DemoGCode
 {
-    public static string Generate(double centerX = 110, double centerY = 90, double size = 30,
+    private const double FilamentArea = Math.PI * 1.75 * 1.75 / 4;
+    private const double Width = 0.45;
+    private const int SolidLayers = 4;
+
+    public static string Generate(double centerX = 110, double centerY = 90, double size = 10,
         double height = 10, double layerHeight = 0.2)
     {
-        var sb = new StringBuilder();
-        var ci = CultureInfo.InvariantCulture;
-        const double filamentArea = Math.PI * 1.75 * 1.75 / 4;
-        const double width = 0.45;
-        double e = 0;
+        var g = new Writer(layerHeight);
+        int layers = Math.Max(1, (int)Math.Round(height / layerHeight));
+        double half = size / 2;
+        double x0 = centerX - half, y0 = centerY - half, x1 = centerX + half, y1 = centerY + half;
 
-        void Line(string s) => sb.Append(s).Append('\n');
-        string F(double v) => v.ToString("0.###", ci);
-        void Move(double x, double y, double feed) => Line($"G0 X{F(x)} Y{F(y)} F{F(feed)}");
-        void Extrude(double x0, double y0, double x1, double y1, double feed, double lh)
-        {
-            double len = Math.Sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-            e += len * width * lh / filamentArea;
-            Line($"G1 X{F(x1)} Y{F(y1)} E{e.ToString("0.#####", ci)} F{F(feed)}");
-        }
+        g.Line($"; Teacup Host calibration cube {g.F(size)} x {g.F(size)} x {g.F(height)} mm");
+        g.Line($"; layer height {g.F(layerHeight)} mm, 2 perimeters, {SolidLayers} solid layers, 20% infill");
+        g.Line("M140 S60");
+        g.Line("M104 S205");
+        g.Line("M190 S60");
+        g.Line("M109 S205");
+        g.Line("G28");
+        g.Line("G90");
+        g.Line("M82");
+        g.Line("G92 E0");
+        g.Line("G1 Z5 F240");
 
-        Line("; Teacup Host demo print");
-        Line($"; size {F(size)} x {F(size)} x {F(height)} mm, layer {F(layerHeight)} mm");
-        Line("M140 S60");
-        Line("M104 S205");
-        Line("M190 S60");
-        Line("M109 S205");
-        Line("G28");
-        Line("G90");
-        Line("M82");
-        Line("G92 E0");
-        Line("G1 Z5 F240");
-
-        // Prime line at the front edge.
-        Line(";TYPE:Skirt");
-        Move(centerX - size / 2 - 5, centerY - size / 2 - 5, 6000);
-        Line($"G1 Z{F(layerHeight)} F240");
-        double px = centerX - size / 2 - 5, py = centerY - size / 2 - 5;
-        Extrude(px, py, px + size + 10, py, 1200, layerHeight);
-        Extrude(px + size + 10, py, px + size + 10, py + size + 10, 1200, layerHeight);
-        Extrude(px + size + 10, py + size + 10, px, py + size + 10, 1200, layerHeight);
-        Extrude(px, py + size + 10, px, py, 1200, layerHeight);
-
-        int layers = (int)Math.Round(height / layerHeight);
-        double radius = size * 0.2;
         for (int layer = 0; layer < layers; layer++)
         {
             double z = (layer + 1) * layerHeight;
-            Line(";LAYER_CHANGE");
-            Line($";Z:{F(z)}");
-            Line($";HEIGHT:{F(layerHeight)}");
-            Line($"G1 E{(e - 0.8).ToString("0.#####", ci)} F2100");   // Retract.
-            Line($"G1 Z{F(z + 0.2)} F240");
-            // Slight twist so the layers are easy to tell apart.
-            double twist = layer * 0.6 * Math.PI / 180;
+            g.Line(";LAYER_CHANGE");
+            g.Line($";Z:{g.F(z)}");
+            g.Line($";HEIGHT:{g.F(layerHeight)}");
+            if (layer > 0)
+                g.Retract();
+            g.Line($"G1 Z{g.F(z)} F240");
+            if (layer == 1)
+                g.Line("M106 S255");
 
-            for (int wall = 0; wall < 2; wall++)
+            if (layer == 0)
             {
-                double inset = wall * width;
-                var pts = RoundedRect(centerX, centerY, size / 2 - inset, radius - inset, twist);
-                Line(wall == 0 ? ";TYPE:External perimeter" : ";TYPE:Perimeter");
-                Move(pts[0].x, pts[0].y, 7200);
-                Line($"G1 Z{F(z)} F240");
-                Line($"G1 E{e.ToString("0.#####", ci)} F2100");       // Unretract.
-                double speed = wall == 0 ? 1500 : 2400;
-                for (int i = 1; i < pts.Count; i++)
-                    Extrude(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, speed, layerHeight);
-                Extrude(pts[^1].x, pts[^1].y, pts[0].x, pts[0].y, speed, layerHeight);
+                // Skirt 3 mm around the cube, two loops.
+                g.Line(";TYPE:Skirt");
+                for (int loop = 0; loop < 2; loop++)
+                {
+                    double d = 3 + loop * Width;
+                    Rectangle(g, x0 - d, y0 - d, x1 + d, y1 + d, 1800);
+                }
             }
 
-            // Solid bottom and top, sparse infill between.
-            bool solid = layer < 3 || layer >= layers - 3;
-            double spacing = solid ? width : 3.0;
-            double half = size / 2 - 2 * width - 0.2;
-            Line(solid ? (layer >= layers - 3 ? ";TYPE:Top solid infill" : ";TYPE:Solid infill") : ";TYPE:Internal infill");
-            bool diag = layer % 2 == 0;
-            int lines = (int)(2 * half / spacing);
-            double lastX = 0, lastY = 0;
-            for (int i = 0; i <= lines; i++)
-            {
-                double o = -half + i * spacing;
-                (double x0, double y0, double x1, double y1) = diag
-                    ? (centerX + o, centerY - half, centerX + o, centerY + half)
-                    : (centerX - half, centerY + o, centerX + half, centerY + o);
-                if (i % 2 == 1)
-                    (x0, y0, x1, y1) = (x1, y1, x0, y0);
-                if (i == 0)
-                    Move(x0, y0, 7200);
-                else
-                    Extrude(lastX, lastY, x0, y0, 3000, layerHeight);
-                Extrude(x0, y0, x1, y1, solid ? 2400 : 3600, layerHeight);
-                lastX = x1;
-                lastY = y1;
-            }
+            // Perimeters: the inner one first, then the outer one (PrusaSlicer order).
+            g.Line(";TYPE:Perimeter");
+            double inset = Width * 1.5;
+            Rectangle(g, x0 + inset, y0 + inset, x1 - inset, y1 - inset, 2400);
+            g.Line(";TYPE:External perimeter");
+            inset = Width / 2;
+            Rectangle(g, x0 + inset, y0 + inset, x1 - inset, y1 - inset, 1500);
+
+            // Infill inside the perimeters, ±45° by layer.
+            bool bottom = layer < SolidLayers;
+            bool top = layer >= layers - SolidLayers;
+            double spacing = bottom || top ? Width : Width / 0.2;
+            g.Line(bottom ? ";TYPE:Solid infill" : top ? ";TYPE:Top solid infill" : ";TYPE:Internal infill");
+            double m = Width * 2 + Width * 0.15;
+            Diagonals(g, x0 + m, y0 + m, x1 - m, y1 - m, spacing, layer % 2 == 0, bottom || top ? 2400 : 3600);
         }
 
-        Line("G1 E" + (e - 1).ToString("0.#####", ci) + " F2100");
-        Line($"G1 Z{F(height + 10)} F240");
-        Line("G0 X10 Y170 F6000");
-        Line("M104 S0");
-        Line("M140 S0");
-        Line("M107");
-        Line("M84");
-        Line("; end of demo print");
-        return sb.ToString();
+        g.Retract();
+        g.Line($"G1 Z{g.F(height + 10)} F240");
+        g.Line("G0 X10 Y170 F6000");
+        g.Line("M107");
+        g.Line("M104 S0");
+        g.Line("M140 S0");
+        g.Line("M84");
+        g.Line("; end of calibration cube");
+        return g.ToString();
     }
 
-    private static List<(double x, double y)> RoundedRect(double cx, double cy, double half, double r,
-        double angle)
+    /// <summary>Closed rectangle, starting at the bottom left corner.</summary>
+    private static void Rectangle(Writer g, double ax, double ay, double bx, double by, double feed)
     {
-        var pts = new List<(double, double)>();
-        r = Math.Max(0.5, r);
-        double inner = half - r;
-        (double, double)[] corners = { (inner, inner), (-inner, inner), (-inner, -inner), (inner, -inner) };
-        double cos = Math.Cos(angle), sin = Math.Sin(angle);
-        for (int c = 0; c < 4; c++)
+        g.TravelTo(ax, ay);
+        g.ExtrudeTo(bx, ay, feed);
+        g.ExtrudeTo(bx, by, feed);
+        g.ExtrudeTo(ax, by, feed);
+        g.ExtrudeTo(ax, ay, feed);
+    }
+
+    /// <summary>Zig-zag of 45° lines (x + y = c, or x - y = c) clipped to a rectangle.</summary>
+    private static void Diagonals(Writer g, double ax, double ay, double bx, double by, double spacing,
+        bool rising, double feed)
+    {
+        if (bx <= ax || by <= ay)
+            return;
+        double step = spacing * Math.Sqrt(2);          // Spacing measured across the lines.
+        var lines = new List<(double X0, double Y0, double X1, double Y1)>();
+        if (rising)
         {
-            for (int k = 0; k <= 6; k++)
+            // Lines x - y = c, from c = ax - by to bx - ay.
+            for (double c = ax - by + step / 2; c < bx - ay; c += step)
             {
-                double a = (c * 90 + k * 15) * Math.PI / 180;
-                double x = corners[c].Item1 + r * Math.Cos(a);
-                double y = corners[c].Item2 + r * Math.Sin(a);
-                pts.Add((cx + x * cos - y * sin, cy + x * sin + y * cos));
+                double sx = Math.Max(ax, ay + c), ex = Math.Min(bx, by + c);
+                if (ex - sx > 1e-3)
+                    lines.Add((sx, sx - c, ex, ex - c));
             }
         }
-        return pts;
+        else
+        {
+            // Lines x + y = c.
+            for (double c = ax + ay + step / 2; c < bx + by; c += step)
+            {
+                double sx = Math.Max(ax, c - by), ex = Math.Min(bx, c - ay);
+                if (ex - sx > 1e-3)
+                    lines.Add((sx, c - sx, ex, c - ex));
+            }
+        }
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var (lx0, ly0, lx1, ly1) = lines[i];
+            if (i % 2 == 1)
+                (lx0, ly0, lx1, ly1) = (lx1, ly1, lx0, ly0);
+            if (i == 0)
+                g.TravelTo(lx0, ly0);
+            else
+                g.ExtrudeTo(lx0, ly0, feed);           // Short link along the perimeter.
+            g.ExtrudeTo(lx1, ly1, feed);
+        }
+    }
+
+    private sealed class Writer
+    {
+        private readonly StringBuilder _sb = new();
+        private readonly double _layerHeight;
+        private double _e;
+        private double _x, _y;
+        private bool _retracted;
+
+        public Writer(double layerHeight) => _layerHeight = layerHeight;
+
+        public string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+
+        private string E(double v) => v.ToString("0.#####", CultureInfo.InvariantCulture);
+
+        public void Line(string s) => _sb.Append(s).Append('\n');
+
+        public void Retract()
+        {
+            if (_retracted)
+                return;
+            Line($"G1 E{E(_e - 0.8)} F2100");
+            _retracted = true;
+        }
+
+        public void TravelTo(double x, double y)
+        {
+            Line($"G0 X{F(x)} Y{F(y)} F7200");
+            _x = x;
+            _y = y;
+        }
+
+        public void ExtrudeTo(double x, double y, double feed)
+        {
+            if (_retracted)
+            {
+                Line($"G1 E{E(_e)} F2100");
+                _retracted = false;
+            }
+            double len = Math.Sqrt((x - _x) * (x - _x) + (y - _y) * (y - _y));
+            _e += len * Width * _layerHeight / FilamentArea;
+            Line($"G1 X{F(x)} Y{F(y)} E{E(_e)} F{F(feed)}");
+            _x = x;
+            _y = y;
+        }
+
+        public override string ToString() => _sb.ToString();
     }
 }

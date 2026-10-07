@@ -11,6 +11,7 @@
     mc:Ignorable="d"
     d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
     Title="Teacup Host"
+    Icon="pack://application:,,,/TeacupHost;component/Assets/AppIcon.ico"
     Width="1560"
     Height="940"
     MinWidth="1100"
@@ -29,10 +30,27 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="Teacup Host — управление 3D-принтером">
+        <ui:TitleBar Grid.Row="0" Title="{DynamicResource S.AppTitle}">
             <ui:TitleBar.Icon>
-                <ui:SymbolIcon Symbol="Cube24" />
+                <ui:ImageIcon Source="pack://application:,,,/TeacupHost;component/Assets/AppIcon.png" />
             </ui:TitleBar.Icon>
+            <ui:TitleBar.Header>
+                <!-- Theme and language switches, left of the window buttons. -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <ui:Button Padding="8,4" Margin="0,0,4,0" Appearance="Transparent"
+                               Command="{Binding ToggleThemeCommand}" ToolTip="{DynamicResource S.ThemeTip}">
+                        <Grid>
+                            <ui:SymbolIcon Symbol="WeatherSunny24"
+                                           Visibility="{Binding IsDarkTheme, Converter={StaticResource BoolToVisibility}}" />
+                            <ui:SymbolIcon Symbol="WeatherMoon24"
+                                           Visibility="{Binding IsDarkTheme, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                        </Grid>
+                    </ui:Button>
+                    <ui:Button Padding="8,4" Appearance="Transparent" Icon="{ui:SymbolIcon LocalLanguage24}"
+                               Content="{Binding LanguageCode}" Command="{Binding ToggleLanguageCommand}"
+                               ToolTip="{DynamicResource S.LanguageTip}" />
+                </StackPanel>
+            </ui:TitleBar.Header>
         </ui:TitleBar>
 
         <!-- ============================================================ Toolbar -->
@@ -44,12 +62,18 @@
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
                     <ui:SymbolIcon Symbol="PlugConnected24" Margin="0,0,8,0" FontSize="18" />
                     <ComboBox Width="180" ItemsSource="{Binding Ports}" SelectedItem="{Binding SelectedPort}"
-                              IsEnabled="{Binding IsDisconnected}" ToolTip="COM-порт принтера" />
+                              IsEnabled="{Binding IsDisconnected}" ToolTip="{DynamicResource S.PortTip}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource PortName}}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <ui:Button Margin="4,0,0,0" Padding="8" Icon="{ui:SymbolIcon ArrowSync24}"
-                               Command="{Binding RefreshPortsCommand}" ToolTip="Обновить список портов" />
+                               Command="{Binding RefreshPortsCommand}" ToolTip="{DynamicResource S.RefreshPortsTip}" />
                     <ComboBox Width="110" Margin="6,0,0,0" ItemsSource="{Binding BaudRates}"
                               SelectedItem="{Binding SelectedBaud}" IsEnabled="{Binding IsDisconnected}"
-                              ToolTip="Скорость. Для USB CDC (Black Pill) не важна, для UART — 115200"
+                              ToolTip="{DynamicResource S.BaudTip}"
                               Visibility="{Binding IsVirtualSelected, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
                     <StackPanel Orientation="Horizontal" Margin="6,0,0,0"
                                 Visibility="{Binding IsVirtualSelected, Converter={StaticResource BoolToVisibility}}">
@@ -57,12 +81,12 @@
                         <ui:NumberBox Width="96" Value="{Binding VirtualTimeScale, Mode=TwoWay}" Minimum="1" Maximum="1000"
                                       SpinButtonPlacementMode="Compact" MaxDecimalPlaces="0" ClearButtonEnabled="False"
                                       IsEnabled="{Binding IsDisconnected}"
-                                      ToolTip="Во сколько раз виртуальный принтер быстрее настоящего" />
+                                      ToolTip="{DynamicResource S.TimeScaleTip}" />
                     </StackPanel>
                     <ui:Button Margin="8,0,0,0" Appearance="Primary" Icon="{ui:SymbolIcon PlugConnected24}"
-                               Content="Подключить" Command="{Binding ConnectCommand}"
+                               Content="{DynamicResource S.Connect}" Command="{Binding ConnectCommand}"
                                Visibility="{Binding IsDisconnected, Converter={StaticResource BoolToVisibility}}" />
-                    <ui:Button Margin="8,0,0,0" Icon="{ui:SymbolIcon PlugDisconnected24}" Content="Отключить"
+                    <ui:Button Margin="8,0,0,0" Icon="{ui:SymbolIcon PlugDisconnected24}" Content="{DynamicResource S.Disconnect}"
                                Command="{Binding DisconnectCommand}"
                                Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}}" />
 
@@ -110,29 +134,29 @@
 
                 <!-- Emergency stop, always at hand -->
                 <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Appearance="Danger"
-                           Icon="{ui:SymbolIcon ErrorCircle24}" Content="СТОП (M112)" FontWeight="Bold"
+                           Icon="{ui:SymbolIcon ErrorCircle24}" Content="{DynamicResource S.EStop}" FontWeight="Bold"
                            Command="{Binding EmergencyStopCommand}"
-                           ToolTip="Аварийный останов: нагреватели и моторы выключаются сразу. Дальше — M999" />
-                <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Icon="{ui:SymbolIcon Cube24}" Content="Демо"
-                           Command="{Binding OpenDemoCommand}" ToolTip="Открыть демонстрационную модель" />
+                           ToolTip="{DynamicResource S.EStopTip}" />
+                <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Icon="{ui:SymbolIcon Cube24}" Content="{DynamicResource S.Cube}"
+                           Command="{Binding OpenDemoCommand}" ToolTip="{DynamicResource S.CubeTip}" />
                 <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Appearance="Secondary"
-                           Icon="{ui:SymbolIcon FolderOpen24}" Content="Открыть"
+                           Icon="{ui:SymbolIcon FolderOpen24}" Content="{DynamicResource S.Open}"
                            Command="{Binding OpenFileCommand}" />
 
                 <!-- Temperatures at a glance -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,16,0">
-                    <Border Padding="10,3" CornerRadius="6" Background="#22FF7043" Margin="0,0,6,0">
+                    <Border Padding="10,3" CornerRadius="6" Background="{DynamicResource HotendChipBrush}" Margin="0,0,6,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Хотэнд " FontSize="12" Foreground="#FFAB91" VerticalAlignment="Center" />
+                            <TextBlock Text="{DynamicResource S.HotendChip}" FontSize="12" Foreground="{DynamicResource HotendTextBrush}" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding HotendTemp, Converter={StaticResource Temperature}}" FontWeight="SemiBold" />
                             <TextBlock Text=" / " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             <TextBlock Text="{Binding HotendTarget, StringFormat={}{0:0}°}"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                     </Border>
-                    <Border Padding="10,3" CornerRadius="6" Background="#2242A5F5">
+                    <Border Padding="10,3" CornerRadius="6" Background="{DynamicResource BedChipBrush}">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Стол " FontSize="12" Foreground="#90CAF9" VerticalAlignment="Center" />
+                            <TextBlock Text="{DynamicResource S.BedChip}" FontSize="12" Foreground="{DynamicResource BedTextBrush}" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding BedTemp, Converter={StaticResource Temperature}}" FontWeight="SemiBold" />
                             <TextBlock Text=" / " Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                             <TextBlock Text="{Binding BedTarget, StringFormat={}{0:0}°}"
@@ -160,34 +184,34 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <ListBox x:Name="LeftTabs" Style="{StaticResource SegmentedTabs}" SelectedIndex="0">
-                    <ListBoxItem ToolTip="Файл, печать с компьютера, загрузка на SD / flash">
+                    <ListBoxItem ToolTip="{DynamicResource S.TabPrintTip}">
                         <StackPanel>
                             <ui:SymbolIcon Symbol="Play24" Style="{StaticResource TabIcon}" />
-                            <TextBlock Text="Печать" Style="{StaticResource TabText}" />
+                            <TextBlock Text="{DynamicResource S.TabPrint}" Style="{StaticResource TabText}" />
                         </StackPanel>
                     </ListBoxItem>
-                    <ListBoxItem ToolTip="Перемещение осей, экструдер, обдув">
+                    <ListBoxItem ToolTip="{DynamicResource S.TabAxesTip}">
                         <StackPanel>
                             <ui:SymbolIcon Symbol="ArrowMove24" Style="{StaticResource TabIcon}" />
-                            <TextBlock Text="Оси" Style="{StaticResource TabText}" />
+                            <TextBlock Text="{DynamicResource S.TabAxes}" Style="{StaticResource TabText}" />
                         </StackPanel>
                     </ListBoxItem>
-                    <ListBoxItem ToolTip="Хотэнд, стол, график температур">
+                    <ListBoxItem ToolTip="{DynamicResource S.TabHeatTip}">
                         <StackPanel>
                             <ui:SymbolIcon Symbol="Temperature24" Style="{StaticResource TabIcon}" />
-                            <TextBlock Text="Нагрев" Style="{StaticResource TabText}" />
+                            <TextBlock Text="{DynamicResource S.TabHeat}" Style="{StaticResource TabText}" />
                         </StackPanel>
                     </ListBoxItem>
-                    <ListBoxItem ToolTip="Файлы на SD-карте / SPI flash принтера">
+                    <ListBoxItem ToolTip="{DynamicResource S.TabSdTip}">
                         <StackPanel>
                             <ui:SymbolIcon Symbol="Storage24" Style="{StaticResource TabIcon}" />
                             <TextBlock Text="SD / flash" Style="{StaticResource TabText}" />
                         </StackPanel>
                     </ListBoxItem>
-                    <ListBoxItem ToolTip="Проверка принтера, остановка, макросы">
+                    <ListBoxItem ToolTip="{DynamicResource S.TabTestsTip}">
                         <StackPanel>
                             <ui:SymbolIcon Symbol="Wrench24" Style="{StaticResource TabIcon}" />
-                            <TextBlock Text="Тесты" Style="{StaticResource TabText}" />
+                            <TextBlock Text="{DynamicResource S.TabTests}" Style="{StaticResource TabText}" />
                         </StackPanel>
                     </ListBoxItem>
                 </ListBox>
@@ -242,7 +266,7 @@
                     <TextBlock Text="{Binding FirmwareName}" FontSize="12" Margin="0,0,16,0"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="{Binding PrintSourceText}" FontSize="12" FontWeight="SemiBold" />
-                    <TextBlock Text="  ·  пауза" FontSize="12" Foreground="#F59E0B"
+                    <TextBlock Text="{DynamicResource S.PausedSuffix}" FontSize="12" Foreground="#F59E0B"
                                Visibility="{Binding IsPaused, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
                 <Grid Grid.Column="1" Margin="16,0" VerticalAlignment="Center"
@@ -254,9 +278,9 @@
                     <ProgressBar Height="6" Minimum="0" Maximum="100" Value="{Binding PrintProgress, Mode=OneWay}" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="1" Margin="10,0,0,0" FontSize="12">
                         <Run Text="{Binding PrintProgress, StringFormat={}{0:0.0}%, Mode=OneWay}" FontWeight="SemiBold" />
-                        <Run Text="  прошло" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <Run Text="{DynamicResource S.ElapsedLower}" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                         <Run Text="{Binding ElapsedText, Mode=OneWay}" />
-                        <Run Text="  осталось" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <Run Text="{DynamicResource S.RemainingLower}" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                         <Run Text="{Binding RemainingText, Mode=OneWay}" />
                     </TextBlock>
                 </Grid>
