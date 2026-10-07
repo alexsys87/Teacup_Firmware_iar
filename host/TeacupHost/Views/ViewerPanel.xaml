@@ -1,0 +1,194 @@
+<UserControl
+    x:Class="TeacupHost.Views.ViewerPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:c="clr-namespace:TeacupHost.Controls">
+    <Grid Margin="0,8,0,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border CornerRadius="8" ClipToBounds="True" Background="#1C1E22"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Grid>
+                        <Grid Visibility="{Binding SelectedIndex, ElementName=ViewTabs, Converter={StaticResource IndexToVisibility}, ConverterParameter=0}">
+                            <c:ToolpathViewport x:Name="View3D"
+                                                Toolpath="{Binding Toolpath}"
+                                                MaxLayer="{Binding MaxLayer}"
+                                                SegmentLimit="{Binding SegmentLimit}"
+                                                ShowTravel="{Binding ShowTravel}"
+                                                NozzlePosition="{Binding NozzlePosition}"
+                                                ShowNozzle="{Binding ShowNozzle}"
+                                                BedWidth="{Binding BedWidth}"
+                                                BedDepth="{Binding BedDepth}"
+                                                FilamentDiameter="{Binding FilamentDiameter}" />
+                            <!-- View presets -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Изо" Click="OnIso" ToolTip="Изометрия" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Сверху" Click="OnTop" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Спереди" Click="OnFront" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Стол" Click="OnBed" ToolTip="Показать весь стол" />
+                                <ui:Button Padding="8,4" Margin="2,0" Icon="{ui:SymbolIcon ArrowReset24}" Click="OnReset"
+                                           ToolTip="Сбросить вид (двойной щелчок)" />
+                            </StackPanel>
+                            <TextBlock HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="10,0,10,8" FontSize="11"
+                                       Foreground="#80FFFFFF"
+                                       Text="ЛКМ — вращение · ПКМ / Shift+ЛКМ — сдвиг · колесо — масштаб" />
+                        </Grid>
+                        <Grid Visibility="{Binding SelectedIndex, ElementName=ViewTabs, Converter={StaticResource IndexToVisibility}, ConverterParameter=1}">
+                            <c:LayerView x:Name="View2D"
+                                         Toolpath="{Binding Toolpath}"
+                                         MaxLayer="{Binding MaxLayer}"
+                                         SegmentLimit="{Binding SegmentLimit}"
+                                         ShowTravel="{Binding ShowTravel}"
+                                         NozzlePosition="{Binding NozzlePosition}"
+                                         ShowNozzle="{Binding ShowNozzle}"
+                                         BedWidth="{Binding BedWidth}"
+                                         BedDepth="{Binding BedDepth}" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Модель" Click="OnFitModel" />
+                                <ui:Button Padding="8,4" Margin="2,0" Content="Стол" Click="OnFitBed" />
+                            </StackPanel>
+                        </Grid>
+                    <!-- View switch and mode badge -->
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8">
+                        <ListBox x:Name="ViewTabs" Style="{StaticResource SegmentedTabs}" SelectedIndex="0" Width="170">
+                            <ListBoxItem>
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Cube24" Margin="0,0,4,0" />
+                                    <TextBlock Text="3D" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ListBoxItem>
+                            <ListBoxItem>
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Layer24" Margin="0,0,4,0" />
+                                    <TextBlock Text="Слой" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ListBoxItem>
+                        </ListBox>
+                        <Border Margin="10,0,0,0" Padding="8,3" CornerRadius="4" VerticalAlignment="Center">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="#33FFFFFF" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ViewerMode}" Value="Simulation">
+                                            <Setter Property="Background" Value="#CC7C3AED" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding ViewerMode}" Value="Live">
+                                            <Setter Property="Background" Value="#CC16A34A" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock Text="{Binding ModeText}" FontSize="11" FontWeight="Bold" Foreground="White" />
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Mode badge and legend -->
+                <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,0,0,8" IsHitTestVisible="True">
+                    <ItemsControl ItemsSource="{Binding Legend}" Margin="0,0,0,6">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel MaxWidth="520" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,10,2">
+                                    <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2" Fill="{Binding Brush}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}" FontSize="11" Margin="4,0,0,0" Foreground="#C0FFFFFF" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <CheckBox Content="Холостые перемещения" IsChecked="{Binding ShowTravel}" FontSize="12" MinWidth="0" />
+                </StackPanel>
+
+
+                <!-- Current command overlay -->
+                <Border HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,56,0,0" Padding="12,6"
+                        CornerRadius="6" Background="#B0101214" MaxWidth="640"
+                        Visibility="{Binding CurrentLineText, Converter={StaticResource NullToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding CurrentLineText}" FontFamily="{StaticResource MonoFont}" FontSize="16"
+                                   FontWeight="SemiBold" Foreground="#60CDFF" TextTrimming="CharacterEllipsis" />
+                        <TextBlock FontSize="11" Foreground="#B0FFFFFF">
+                            <Run Text="{Binding CurrentLineNumberText, Mode=OneWay}" />
+                            <Run Text="   " />
+                            <Run Text="{Binding NozzleText, Mode=OneWay}" />
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+                <!-- Layer slider -->
+                <Grid Grid.Column="1" Width="64" Margin="0,8,4,8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Слой" HorizontalAlignment="Center" FontSize="11" Foreground="#A0FFFFFF" />
+                    <Slider Grid.Row="1" Orientation="Vertical" HorizontalAlignment="Center" Margin="0,6"
+                            Minimum="0" Maximum="{Binding LayerSliderMax}" Value="{Binding MaxLayer}"
+                            IsSnapToTickEnabled="True" TickFrequency="1" SmallChange="1" LargeChange="10"
+                            IsEnabled="{Binding IsLive, Converter={StaticResource InverseBool}}" />
+                    <TextBlock Grid.Row="2" Text="{Binding LayerText}" FontSize="10" TextWrapping="Wrap" TextAlignment="Center"
+                               Foreground="#C0FFFFFF" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Simulation controls -->
+        <Border Grid.Row="1" Margin="0,6,0,0" Padding="10,6" CornerRadius="8"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid IsEnabled="{Binding CanSimulate}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Rewind24}" Command="{Binding SimLayerBackCommand}"
+                               ToolTip="Предыдущий слой" />
+                    <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Previous24}" Command="{Binding SimStepBackCommand}"
+                               ToolTip="Предыдущее перемещение" />
+                    <ui:Button Padding="7" Margin="0,0,2,0" Appearance="Primary" Command="{Binding SimPlayPauseCommand}"
+                               ToolTip="Симуляция: старт / пауза">
+                        <Grid>
+                            <ui:SymbolIcon Symbol="Play24"
+                                           Visibility="{Binding SimPlaying, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                            <ui:SymbolIcon Symbol="Pause24"
+                                           Visibility="{Binding SimPlaying, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                    </ui:Button>
+                    <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon Next24}" Command="{Binding SimStepForwardCommand}"
+                               ToolTip="Следующее перемещение" />
+                    <ui:Button Padding="7" Margin="0,0,2,0" Icon="{ui:SymbolIcon FastForward24}" Command="{Binding SimLayerForwardCommand}"
+                               ToolTip="Следующий слой" />
+                    <ui:Button Padding="7" Margin="0,0,8,0" Icon="{ui:SymbolIcon Stop24}" Command="{Binding SimStopCommand}"
+                               ToolTip="Закончить симуляцию" />
+                </StackPanel>
+                <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="{Binding SimTotal}"
+                        Value="{Binding SimTime}" ToolTip="Время печати (оценка)" />
+                <TextBlock Grid.Column="2" Margin="10,0" VerticalAlignment="Center" FontFamily="{StaticResource MonoFont}"
+                           FontSize="12" Text="{Binding SimTimeText}" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource Label}" Text="Скорость ×" Margin="0,0,4,0" />
+                    <ComboBox Width="90" ItemsSource="{Binding SimSpeeds}" SelectedItem="{Binding SimSpeed}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,0 +1,72 @@
+<UserControl
+    x:Class="TeacupHost.Views.GCodePanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Border CornerRadius="8" Padding="10" Margin="0,8,0,0"
+            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <DockPanel Margin="0,0,0,6">
+                <ui:SymbolIcon Symbol="Code24" Margin="0,0,6,0" />
+                <TextBlock Text="G-код" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Label}"
+                           Text="{Binding CurrentLineNumberText}" />
+            </DockPanel>
+
+            <!-- The command being executed, big -->
+            <Border Grid.Row="1" Margin="0,0,0,6" Padding="10,6" CornerRadius="6" Background="#1A60CDFF"
+                    Visibility="{Binding CurrentLineText, Converter={StaticResource NullToVisibility}}">
+                <TextBlock Text="{Binding CurrentLineText}" FontFamily="{StaticResource MonoFont}" FontSize="15"
+                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Border>
+
+            <ListBox x:Name="Lines" Grid.Row="2" ItemsSource="{Binding GCodeLines}"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Item" ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     FontFamily="{StaticResource MonoFont}" FontSize="12" Background="Transparent"
+                     SelectionChanged="OnSelectionChanged"
+                     ToolTip="Щелчок по строке — симуляция до этой строки">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource DefaultListBoxItemStyle}">
+                        <Setter Property="Padding" Value="4,1" />
+                        <Setter Property="Margin" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Width="58" Margin="0,0,10,0" TextAlignment="Right" Text="{Binding Number}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="{Binding Text}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsComment}" Value="True">
+                                                <Setter Property="Foreground" Value="#6A9955" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+    </Border>
+</UserControl>

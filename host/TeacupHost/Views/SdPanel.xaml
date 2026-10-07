@@ -1,0 +1,72 @@
+<UserControl
+    x:Class="TeacupHost.Views.SdPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:Card Style="{StaticResource PanelCard}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionTitle}" Text="SD-карта / SPI flash принтера" />
+                <WrapPanel>
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowSync24}" Content="Список (M20)"
+                               Command="{Binding SdRefreshCommand}" />
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Storage24}" Content="Подключить (M21)"
+                               Command="{Binding SdInitCommand}" ToolTip="Смонтировать карту после замены" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Hint}" Text="{Binding SdStatus}" />
+            </StackPanel>
+        </ui:Card>
+
+        <ui:Card Grid.Row="1" Style="{StaticResource PanelCard}" Padding="4">
+            <ListBox ItemsSource="{Binding SdFiles}" SelectedItem="{Binding SelectedSdFile}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" Background="Transparent">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="4,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Symbol="DocumentText24" Margin="0,0,8,0" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontFamily="{StaticResource MonoFont}"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{Binding SizeText}" Style="{StaticResource Label}" Margin="8,0,0,0" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </ui:Card>
+
+        <ui:Card Grid.Row="2" Style="{StaticResource PanelCard}">
+            <StackPanel>
+                <WrapPanel>
+                    <ui:Button Style="{StaticResource SmallButton}" Appearance="Primary" Icon="{ui:SymbolIcon Play24}"
+                               Content="Печать" Command="{Binding SdPrintCommand}" ToolTip="M23 имя, M24" />
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Pause24}" Content="Пауза"
+                               Command="{Binding PauseCommand}" ToolTip="M25" />
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon PlayCircle24}" Content="Продолжить"
+                               Command="{Binding ResumeCommand}" ToolTip="M24" />
+                    <ui:Button Style="{StaticResource SmallButton}" Appearance="Danger" Icon="{ui:SymbolIcon Stop24}"
+                               Content="Стоп" Command="{Binding StopCommand}" />
+                </WrapPanel>
+                <WrapPanel>
+                    <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Delete24}" Content="Удалить (M30)"
+                               Command="{Binding SdDeleteCommand}" />
+                    <ui:Button Style="{StaticResource SmallButton}" Appearance="Caution" Icon="{ui:SymbolIcon Delete24}"
+                               Content="Очистить flash (M9002)" Command="{Binding SdFormatCommand}" />
+                </WrapPanel>
+                <ProgressBar Height="6" Margin="0,4,0,0" Minimum="0" Maximum="100" Value="{Binding PrintProgress, Mode=OneWay}"
+                             Visibility="{Binding IsPrinting, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                           Text="Во время печати с SD программа опрашивает M27 и показывает текущую строку — для файлов, загруженных из этой программы, или если открыт тот же файл (совпадает размер)." />
+            </StackPanel>
+        </ui:Card>
+    </Grid>
+</UserControl>
