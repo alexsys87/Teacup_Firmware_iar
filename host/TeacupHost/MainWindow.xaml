@@ -148,7 +148,7 @@
                            Command="{Binding EmergencyStopCommand}"
                            ToolTip="{DynamicResource S.EStopTip}" />
                 <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Icon="{ui:SymbolIcon Cube24}" Content="{DynamicResource S.Cube}"
-                           Command="{Binding OpenDemoCommand}" ToolTip="{DynamicResource S.CubeTip}" />
+                           Command="{Binding OpenDemoCommand}" ToolTip="{Binding CubeTip}" />
                 <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Appearance="Secondary"
                            Icon="{ui:SymbolIcon FolderOpen24}" Content="{DynamicResource S.Open}"
                            Command="{Binding OpenFileCommand}" />

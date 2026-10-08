@@ -85,7 +85,7 @@ public class ProtocolTests
     }
 
     private static string FastPrint() =>
-        DemoGCode.Generate(size: 10, height: 0.6).Replace("M190 S60\n", "").Replace("M109 S205\n", "");
+        DemoGCode.Generate(width: 10, depth: 10, height: 0.6).Replace("M190 S60\n", "").Replace("M109 S205\n", "");
 
     private sealed class BusyPort : IPrinterTransport
     {

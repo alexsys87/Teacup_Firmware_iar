@@ -98,8 +98,73 @@ public sealed partial class MainViewModel
         await LoadAsync(Path.GetFileName(path), () => GCodeDocument.Load(path));
     }
 
-    private Task LoadDemoAsync() =>
-        LoadAsync("cube100.gcode", () => GCodeDocument.FromText("cube100.gcode", DemoGCode.Generate()));
+    // ---------------------------------------------------------------- test cube
+
+    // Leave room on the bed for the skirt and above the cube for the final lift.
+    private double MaxCubeWidth => Math.Max(DemoGCode.MinSide, BedWidth - 2 * DemoGCode.SkirtMargin);
+    private double MaxCubeDepth => Math.Max(DemoGCode.MinSide, BedDepth - 2 * DemoGCode.SkirtMargin);
+    private double MaxCubeHeight => Math.Max(DemoGCode.MaxLayerHeight, _settings.BedHeight - DemoGCode.EndLift);
+
+    public double CubeWidth
+    {
+        get => _settings.CubeWidth;
+        set => SetCubeSize(() => _settings.CubeWidth = Math.Clamp(value, DemoGCode.MinSide, MaxCubeWidth));
+    }
+
+    public double CubeDepth
+    {
+        get => _settings.CubeDepth;
+        set => SetCubeSize(() => _settings.CubeDepth = Math.Clamp(value, DemoGCode.MinSide, MaxCubeDepth));
+    }
+
+    public double CubeHeight
+    {
+        get => _settings.CubeHeight;
+        set => SetCubeSize(() => _settings.CubeHeight = Math.Clamp(value, DemoGCode.MinLayerHeight, MaxCubeHeight));
+    }
+
+    public double CubeLayerHeight
+    {
+        get => _settings.CubeLayerHeight;
+        set => SetCubeSize(() => _settings.CubeLayerHeight =
+            Math.Clamp(value, DemoGCode.MinLayerHeight, DemoGCode.MaxLayerHeight));
+    }
+
+    /// <summary>"100 × 100 × 100" in millimetres.</summary>
+    public string CubeSizeText => $"{N(CubeWidth)} × {N(CubeDepth)} × {N(CubeHeight)}";
+
+    public string CubeTip => Loc.F("S.CubeTip", CubeSizeText);
+
+    private void SetCubeSize(Action apply)
+    {
+        apply();
+        // NaN from an emptied box: back to the default size.
+        if (double.IsNaN(_settings.CubeWidth)) _settings.CubeWidth = 100;
+        if (double.IsNaN(_settings.CubeDepth)) _settings.CubeDepth = 100;
+        if (double.IsNaN(_settings.CubeHeight)) _settings.CubeHeight = 100;
+        if (double.IsNaN(_settings.CubeLayerHeight)) _settings.CubeLayerHeight = 0.2;
+        OnPropertyChanged(nameof(CubeWidth));
+        OnPropertyChanged(nameof(CubeDepth));
+        OnPropertyChanged(nameof(CubeHeight));
+        OnPropertyChanged(nameof(CubeLayerHeight));
+        OnPropertyChanged(nameof(CubeSizeText));
+        OnPropertyChanged(nameof(CubeTip));
+    }
+
+    /// <summary>Generates the test cube of the size set on the Print tab, centred on the bed.</summary>
+    private Task LoadDemoAsync()
+    {
+        // Settings from an older version or edited by hand may be out of range.
+        CubeWidth = CubeWidth;
+        CubeDepth = CubeDepth;
+        CubeHeight = CubeHeight;
+        CubeLayerHeight = CubeLayerHeight;
+        double w = CubeWidth, d = CubeDepth, layer = CubeLayerHeight;
+        double h = Math.Max(CubeHeight, layer);
+        string name = w == d && d == h ? $"cube{N(w)}.gcode" : $"cube{N(w)}x{N(d)}x{N(h)}.gcode";
+        double cx = BedWidth / 2, cy = BedDepth / 2;
+        return LoadAsync(name, () => GCodeDocument.FromText(name, DemoGCode.Generate(cx, cy, w, d, h, layer)));
+    }
 
     private async Task LoadAsync(string name, Func<GCodeDocument> load)
     {

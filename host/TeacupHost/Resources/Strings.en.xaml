@@ -12,7 +12,7 @@
     <sys:String x:Key="S.EStop">STOP (M112)</sys:String>
     <sys:String x:Key="S.EStopTip">Emergency stop: heaters and motors off at once. Then M999</sys:String>
     <sys:String x:Key="S.Cube">Cube</sys:String>
-    <sys:String x:Key="S.CubeTip">Open the 10 × 10 × 10 cm test cube</sys:String>
+    <sys:String x:Key="S.CubeTip">Open the {0} mm test cube (set the size on the Print tab)</sys:String>
     <sys:String x:Key="S.Open">Open</sys:String>
     <sys:String x:Key="S.HotendChip" xml:space="preserve">Hotend </sys:String>
     <sys:String x:Key="S.BedChip" xml:space="preserve">Bed </sys:String>
@@ -65,7 +65,14 @@
     <sys:String x:Key="S.ListingTip">Click a line to simulate up to it</sys:String>
     <sys:String x:Key="S.File">File</sys:String>
     <sys:String x:Key="S.OpenEllipsis">Open…</sys:String>
-    <sys:String x:Key="S.CubeModel">10 cm test cube</sys:String>
+    <sys:String x:Key="S.CubeTitle">Test cube, mm</sys:String>
+    <sys:String x:Key="S.CubeLayer">Layer</sys:String>
+    <sys:String x:Key="S.CubeCreate">Create</sys:String>
+    <sys:String x:Key="S.CubeWidthTip">Width along X</sys:String>
+    <sys:String x:Key="S.CubeDepthTip">Depth along Y</sys:String>
+    <sys:String x:Key="S.CubeHeightTip">Height along Z</sys:String>
+    <sys:String x:Key="S.CubeLayerTip">Layer height</sys:String>
+    <sys:String x:Key="S.CubeHint">Placed in the middle of the bed: skirt, 2 perimeters, 4 solid layers at the bottom and top, 20% infill. The size is limited by the bed and the print height.</sys:String>
     <sys:String x:Key="S.DropHint">You can also drop a file onto the window.</sys:String>
     <sys:String x:Key="S.HostPrintTitle">Print from this computer (COM port)</sys:String>
     <sys:String x:Key="S.Print">Print</sys:String>

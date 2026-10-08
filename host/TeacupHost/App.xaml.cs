@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Threading;
+using TeacupHost.Infrastructure;
 using TeacupHost.Services;
 using TeacupHost.ViewModels;
 
@@ -11,6 +12,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
         DispatcherUnhandledException += OnUnhandled;
+        NumberBoxCommit.Register();
 
         var settings = AppSettings.Load();
         // Language and theme before the window: its texts and colors come from them.

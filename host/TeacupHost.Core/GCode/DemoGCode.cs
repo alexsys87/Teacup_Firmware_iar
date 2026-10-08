@@ -4,9 +4,9 @@ using System.Text;
 namespace TeacupHost.Core.GCode;
 
 /// <summary>
-/// Generates a test cube (100 × 100 × 100 mm by default, any size by the
-/// arguments): skirt, two perimeters, four solid bottom and top layers and
-/// 20 % sparse infill at ±45°. Used by the virtual printer and to try out the viewer
+/// Generates a test cube (100 × 100 × 100 mm by default; width, depth and
+/// height are set separately, so it can be any box): skirt, two perimeters,
+/// four solid bottom and top layers and 20 % sparse infill at ±45°. Used by the virtual printer and to try out the viewer
 /// without a slicer. Comments follow PrusaSlicer (";TYPE:", ";LAYER_CHANGE").
 /// </summary>
 public static class DemoGCode
@@ -15,15 +15,34 @@ public static class DemoGCode
     private const double Width = 0.45;
     private const int SolidLayers = 4;
 
-    public static string Generate(double centerX = 110, double centerY = 90, double size = 100,
-        double height = 100, double layerHeight = 0.2)
+    /// <summary>Smallest side: both perimeters must fit inside.</summary>
+    public const double MinSide = 2;
+    public const double MinLayerHeight = 0.05;
+    public const double MaxLayerHeight = 1;
+
+    /// <summary>How far the skirt reaches out of the cube on each side, mm.</summary>
+    public const double SkirtMargin = 3 + Width * 1.5;
+
+    /// <summary>The nozzle rises this much above the cube at the end, mm.</summary>
+    public const double EndLift = 10;
+
+    public static string Generate(double centerX = 110, double centerY = 90, double width = 100,
+        double depth = 100, double height = 100, double layerHeight = 0.2)
     {
+        if (!(layerHeight >= MinLayerHeight && layerHeight <= MaxLayerHeight))
+            throw new ArgumentOutOfRangeException(nameof(layerHeight));
+        if (!(width >= MinSide))
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (!(depth >= MinSide))
+            throw new ArgumentOutOfRangeException(nameof(depth));
+        if (!(height >= layerHeight))
+            throw new ArgumentOutOfRangeException(nameof(height));
+
         var g = new Writer(layerHeight);
         int layers = Math.Max(1, (int)Math.Round(height / layerHeight));
-        double half = size / 2;
-        double x0 = centerX - half, y0 = centerY - half, x1 = centerX + half, y1 = centerY + half;
+        double x0 = centerX - width / 2, y0 = centerY - depth / 2, x1 = centerX + width / 2, y1 = centerY + depth / 2;
 
-        g.Line($"; Teacup Host test cube {g.F(size)} x {g.F(size)} x {g.F(height)} mm");
+        g.Line($"; Teacup Host test cube {g.F(width)} x {g.F(depth)} x {g.F(height)} mm");
         g.Line($"; layer height {g.F(layerHeight)} mm, 2 perimeters, {SolidLayers} solid layers, 20% infill");
         g.Line("M140 S60");
         g.Line("M104 S205");
@@ -76,7 +95,7 @@ public static class DemoGCode
         }
 
         g.Retract();
-        g.Line($"G1 Z{g.F(height + 10)} F240");
+        g.Line($"G1 Z{g.F(layers * layerHeight + EndLift)} F240");
         g.Line("G0 X10 Y170 F6000");
         g.Line("M107");
         g.Line("M104 S0");

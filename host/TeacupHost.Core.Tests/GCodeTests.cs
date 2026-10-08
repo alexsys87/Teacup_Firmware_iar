@@ -209,4 +209,36 @@ public class GCodeTests
         }
         Assert.Equal(tp.Segments.Length, next);
     }
+
+    [Fact]
+    public void TestCubeTakesAnySize()
+    {
+        // A flat box 40 × 20 × 5 mm with 0.25 mm layers around (110, 90).
+        var doc = GCodeDocument.FromText("box", DemoGCode.Generate(110, 90, width: 40, depth: 20, height: 5, layerHeight: 0.25));
+        Assert.StartsWith("; Teacup Host test cube 40 x 20 x 5 mm", doc.Lines[0]);
+        var tp = ToolpathBuilder.Build(doc.Lines);
+        Assert.Equal(20, tp.Layers.Count);
+        Assert.Equal(5f, tp.Layers[^1].Z, 3);
+        var walls = tp.Segments.Where(s => s.Feature == FeatureType.OuterWall).ToArray();
+        Assert.Equal(90f, walls.Min(s => Math.Min(s.Start.X, s.End.X)) - 0.225f, 3);
+        Assert.Equal(130f, walls.Max(s => Math.Max(s.Start.X, s.End.X)) + 0.225f, 3);
+        Assert.Equal(80f, walls.Min(s => Math.Min(s.Start.Y, s.End.Y)) - 0.225f, 3);
+        Assert.Equal(100f, walls.Max(s => Math.Max(s.Start.Y, s.End.Y)) + 0.225f, 3);
+        foreach (var s in tp.Segments.Where(s => s.Feature is FeatureType.Infill or FeatureType.SolidInfill or FeatureType.TopSolid))
+        {
+            Assert.InRange(s.End.X, 90.5f, 129.5f);
+            Assert.InRange(s.End.Y, 80.5f, 99.5f);
+        }
+
+        // The smallest side still gives a valid file.
+        var tiny = ToolpathBuilder.Build(GCodeDocument.FromText("tiny",
+            DemoGCode.Generate(width: DemoGCode.MinSide, depth: DemoGCode.MinSide, height: 1)).Lines);
+        Assert.Equal(5, tiny.Layers.Count);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => DemoGCode.Generate(width: 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DemoGCode.Generate(depth: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DemoGCode.Generate(height: 0.1, layerHeight: 0.2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DemoGCode.Generate(layerHeight: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DemoGCode.Generate(layerHeight: double.NaN));
+    }
 }
