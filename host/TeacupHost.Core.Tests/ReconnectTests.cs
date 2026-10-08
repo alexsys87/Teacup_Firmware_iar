@@ -135,7 +135,7 @@ public class ReconnectTests
     }
 
     private static string Print() =>
-        DemoGCode.Generate(size: 10, height: 1).Replace("M190 S60\n", "").Replace("M109 S205\n", "");
+        DemoGCode.Generate(width: 10, depth: 10, height: 1).Replace("M190 S60\n", "").Replace("M109 S205\n", "");
 
     private static PrinterConnection NewConnection() => new()
     {
@@ -471,7 +471,7 @@ public class TelnetTests
     {
         using var bridge = new TelnetBridge(new VirtualPrinter { TimeScale = 50 });
         using var conn = new PrinterConnection { ReconnectInterval = 0.2, LinkTimeout = 5 };
-        var doc = GCodeDocument.FromText("t", DemoGCode.Generate(size: 10, height: 1)
+        var doc = GCodeDocument.FromText("t", DemoGCode.Generate(width: 10, depth: 10, height: 1)
             .Replace("M190 S60\n", "").Replace("M109 S205\n", ""));
         var job = new List<JobLine>();
         for (int i = 0; i < doc.Lines.Count; i++)

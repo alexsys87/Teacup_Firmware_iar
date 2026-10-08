@@ -17,10 +17,50 @@
                     <WrapPanel>
                         <ui:Button Style="{StaticResource SmallButton}" Appearance="Secondary"
                                    Icon="{ui:SymbolIcon FolderOpen24}" Content="{DynamicResource S.OpenEllipsis}" Command="{Binding OpenFileCommand}" />
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon Cube24}" Content="{DynamicResource S.CubeModel}"
-                                   Command="{Binding OpenDemoCommand}" />
                     </WrapPanel>
                     <TextBlock Style="{StaticResource Hint}" Text="{DynamicResource S.DropHint}" />
+                </StackPanel>
+            </ui:Card>
+
+            <!-- Test cube size -->
+            <ui:Card Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.CubeTitle}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource Label}" Text="X" Margin="0,0,6,0" />
+                        <ui:NumberBox Grid.Column="1" Value="{Binding CubeWidth, Mode=TwoWay}" Minimum="2" Maximum="1000"
+                                      SmallChange="5" MaxDecimalPlaces="2" ClearButtonEnabled="False"
+                                      SpinButtonPlacementMode="Hidden" ToolTip="{DynamicResource S.CubeWidthTip}" />
+                        <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="Y" Margin="10,0,6,0" />
+                        <ui:NumberBox Grid.Column="3" Value="{Binding CubeDepth, Mode=TwoWay}" Minimum="2" Maximum="1000"
+                                      SmallChange="5" MaxDecimalPlaces="2" ClearButtonEnabled="False"
+                                      SpinButtonPlacementMode="Hidden" ToolTip="{DynamicResource S.CubeDepthTip}" />
+                        <TextBlock Grid.Column="4" Style="{StaticResource Label}" Text="Z" Margin="10,0,6,0" />
+                        <ui:NumberBox Grid.Column="5" Value="{Binding CubeHeight, Mode=TwoWay}" Minimum="0.05" Maximum="1000"
+                                      SmallChange="5" MaxDecimalPlaces="2" ClearButtonEnabled="False"
+                                      SpinButtonPlacementMode="Hidden" ToolTip="{DynamicResource S.CubeHeightTip}" />
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource Label}" HorizontalAlignment="Right"
+                                   Text="{DynamicResource S.CubeLayer}" Margin="0,8,6,0" />
+                        <ui:NumberBox Grid.Row="1" Grid.Column="3" Margin="0,8,0,0" Value="{Binding CubeLayerHeight, Mode=TwoWay}"
+                                      Minimum="0.05" Maximum="1" SmallChange="0.05" MaxDecimalPlaces="2" ClearButtonEnabled="False"
+                                      SpinButtonPlacementMode="Hidden" ToolTip="{DynamicResource S.CubeLayerTip}" />
+                        <ui:Button Grid.Row="1" Grid.Column="4" Grid.ColumnSpan="2" Margin="10,8,0,0" HorizontalAlignment="Stretch"
+                                   Icon="{ui:SymbolIcon Cube24}" Content="{DynamicResource S.CubeCreate}"
+                                   Command="{Binding OpenDemoCommand}" ToolTip="{Binding CubeTip}" />
+                    </Grid>
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" Text="{DynamicResource S.CubeHint}" />
                 </StackPanel>
             </ui:Card>
 

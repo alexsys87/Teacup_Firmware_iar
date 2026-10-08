@@ -12,7 +12,7 @@
     <sys:String x:Key="S.EStop">СТОП (M112)</sys:String>
     <sys:String x:Key="S.EStopTip">Аварийный останов: нагреватели и моторы выключаются сразу. Дальше — M999</sys:String>
     <sys:String x:Key="S.Cube">Куб</sys:String>
-    <sys:String x:Key="S.CubeTip">Открыть тестовый куб 10 × 10 × 10 см</sys:String>
+    <sys:String x:Key="S.CubeTip">Открыть тестовый куб {0} мм (размер — на вкладке «Печать»)</sys:String>
     <sys:String x:Key="S.Open">Открыть</sys:String>
     <sys:String x:Key="S.HotendChip" xml:space="preserve">Хотэнд </sys:String>
     <sys:String x:Key="S.BedChip" xml:space="preserve">Стол </sys:String>
@@ -65,7 +65,14 @@
     <sys:String x:Key="S.ListingTip">Щелчок по строке — симуляция до этой строки</sys:String>
     <sys:String x:Key="S.File">Файл</sys:String>
     <sys:String x:Key="S.OpenEllipsis">Открыть…</sys:String>
-    <sys:String x:Key="S.CubeModel">Тестовый куб 10 см</sys:String>
+    <sys:String x:Key="S.CubeTitle">Тестовый куб, мм</sys:String>
+    <sys:String x:Key="S.CubeLayer">Слой</sys:String>
+    <sys:String x:Key="S.CubeCreate">Создать</sys:String>
+    <sys:String x:Key="S.CubeWidthTip">Ширина по X</sys:String>
+    <sys:String x:Key="S.CubeDepthTip">Глубина по Y</sys:String>
+    <sys:String x:Key="S.CubeHeightTip">Высота по Z</sys:String>
+    <sys:String x:Key="S.CubeLayerTip">Высота слоя</sys:String>
+    <sys:String x:Key="S.CubeHint">Ставится в центр стола: юбка, 2 периметра, по 4 сплошных слоя снизу и сверху, заполнение 20 %. Размер ограничен столом и высотой печати.</sys:String>
     <sys:String x:Key="S.DropHint">Файл можно перетащить в окно мышью.</sys:String>
     <sys:String x:Key="S.HostPrintTitle">Печать с компьютера (COM-порт)</sys:String>
     <sys:String x:Key="S.Print">Печать</sys:String>
