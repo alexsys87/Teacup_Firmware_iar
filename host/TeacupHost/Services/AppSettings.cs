@@ -31,6 +31,11 @@ public sealed class AppSettings
     public double CubeHeight { get; set; } = 100;
     public double CubeLayerHeight { get; set; } = 0.2;
 
+    /// <summary>Arrow keys and friends move the axes while the Axes tab is open.</summary>
+    public bool KeyboardControl { get; set; } = true;
+    /// <summary>A gamepad or joystick moves the axes while the program window is active.</summary>
+    public bool GamepadControl { get; set; } = true;
+
     public double JogFeedXY { get; set; } = 3000;
     public double JogFeedZ { get; set; } = 240;
     public double ExtrudeLength { get; set; } = 5;

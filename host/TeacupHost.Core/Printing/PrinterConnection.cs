@@ -177,6 +177,13 @@ public sealed class PrinterConnection : IDisposable
     public bool IsSdPrinting { get { lock (_lock) return _sdPrinting; } }
     public bool IsSdPaused { get { lock (_lock) return _sdPrinting && _sdPaused; } }
 
+    /// <summary>
+    /// Commands queued by <see cref="Send"/> that have not been written yet. The link is
+    /// stop-and-wait (the next line goes out after the "ok"), so this grows when the printer is slow;
+    /// manual jogging checks it to avoid piling up moves.
+    /// </summary>
+    public int QueuedCommands { get { lock (_lock) return _priority.Count; } }
+
     public event Action<ConnectionState>? StateChanged;
     public event Action<string>? LineReceived;
     public event Action<string, SendKind>? LineSent;

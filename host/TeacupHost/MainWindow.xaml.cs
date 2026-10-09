@@ -1,13 +1,18 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using TeacupHost.Services;
 using TeacupHost.ViewModels;
 
 namespace TeacupHost;
 
 public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
+    /// <summary>Position of the Axes tab in LeftTabs.</summary>
+    private const int AxesTabIndex = 1;
+
     private readonly MainViewModel _vm;
+    private readonly InputController _input;
 
     public MainWindow(MainViewModel vm)
     {
@@ -16,6 +21,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         Drop += OnDrop;
         DragOver += OnDragOver;
+
+        // Keyboard and gamepad control of the axes.
+        _input = new InputController(vm, this, () => LeftTabs.SelectedIndex == AxesTabIndex);
+        PreviewKeyDown += (_, e) => _input.OnPreviewKeyDown(e);
     }
 
     private void OnDragOver(object sender, DragEventArgs e)
@@ -39,6 +48,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             e.Cancel = true;
             return;
         }
+        _input.Dispose();
         _vm.SaveSettings();
         _vm.Dispose();
         base.OnClosing(e);

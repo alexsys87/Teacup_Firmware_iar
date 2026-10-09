@@ -260,18 +260,42 @@ public sealed partial class MainViewModel
         if (a == 'Z')
             d = Math.Sign(d) * Math.Min(Math.Abs(d), 10);       // Z is slow, 10 mm at most.
         double feed = a == 'Z' ? JogFeedZ : JogFeedXY;
-        _conn.Send("G91");
-        _conn.Send($"G1 {a}{N(d)} F{N(feed)}");
-        _conn.Send("G90");
-        _conn.Send("M114", SendKind.Poll);
+        SendJog(a == 'X' ? d : 0, a == 'Y' ? d : 0, a == 'Z' ? d : 0, feed, poll: true);
     }
 
-    private void Extrude(double length)
+    /// <summary>A relative move of one or more axes (G91, G1, G90), used by the buttons, the keyboard and the gamepad.</summary>
+    private void SendJog(double x, double y, double z, double feed, bool poll)
     {
-        if (HotendTemp < 170 &&
-            MessageBox.Show(Loc.F("S.Ask.ColdExtrude", HotendTemp),
-                Loc.T("S.Ask.ColdExtrudeTitle"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        var axes = new List<string>(3);
+        if (x != 0)
+            axes.Add("X" + N(x));
+        if (y != 0)
+            axes.Add("Y" + N(y));
+        if (z != 0)
+            axes.Add("Z" + N(z));
+        if (axes.Count == 0)
             return;
+        _conn.Send("G91");
+        _conn.Send($"G1 {string.Join(' ', axes)} F{N(feed)}");
+        _conn.Send("G90");
+        if (poll)
+            _conn.Send("M114", SendKind.Poll);
+    }
+
+    /// <param name="interactive">Ask before extruding cold (buttons). Keys and the gamepad can't answer a dialog: they only warn.</param>
+    private void Extrude(double length, bool interactive = true)
+    {
+        if (HotendTemp < 170)
+        {
+            if (!interactive)
+            {
+                Notify(Loc.T("S.Notice.ColdExtrudeTitle"), Loc.F("S.Notice.ColdExtrudeText", HotendTemp), NotifySeverity.Info);
+                return;
+            }
+            if (MessageBox.Show(Loc.F("S.Ask.ColdExtrude", HotendTemp),
+                    Loc.T("S.Ask.ColdExtrudeTitle"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+        }
         _conn.Send("G91");
         _conn.Send($"G1 E{N(length)} F{N(ExtrudeFeed)}");
         _conn.Send("G90");

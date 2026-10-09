@@ -4,195 +4,211 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
-        <StackPanel IsEnabled="{Binding IsOnline}">
-            <!-- Jog -->
-            <ui:Card Style="{StaticResource PanelCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Movement}" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.StepMm}" Margin="0,0,8,0" />
-                        <ListBox ItemsSource="{Binding JogSteps}" SelectedItem="{Binding JogStep}"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" Background="Transparent"
-                                 BorderThickness="0">
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}" MinWidth="26" TextAlignment="Center" />
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
+        <StackPanel>
+            <StackPanel IsEnabled="{Binding IsOnline}">
+                <!-- Jog -->
+                <ui:Card Style="{StaticResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Movement}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.StepMm}" Margin="0,0,8,0" />
+                            <ListBox ItemsSource="{Binding JogSteps}" SelectedItem="{Binding JogStep}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" Background="Transparent"
+                                     BorderThickness="0">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" MinWidth="26" TextAlignment="Center" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6">
+                            <Run Text="{DynamicResource S.CurrentStep}" />
+                            <Run Text="{Binding JogStep, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text="{DynamicResource S.StepNote}" />
+                        </TextBlock>
+
+                        <Grid HorizontalAlignment="Left" IsEnabled="{Binding CanControl}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ui:Button Grid.Row="0" Grid.Column="1" Style="{StaticResource JogButton}" Content="Y+"
+                                       Command="{Binding JogCommand}" CommandParameter="Y+" />
+                            <ui:Button Grid.Row="1" Grid.Column="0" Style="{StaticResource JogButton}" Content="X−"
+                                       Command="{Binding JogCommand}" CommandParameter="X-" />
+                            <ui:Button Grid.Row="1" Grid.Column="1" Style="{StaticResource JogButton}" Appearance="Secondary"
+                                       Icon="{ui:SymbolIcon Home24}" Command="{Binding HomeCommand}" CommandParameter="XY"
+                                       ToolTip="{DynamicResource S.HomeXYTip}" />
+                            <ui:Button Grid.Row="1" Grid.Column="2" Style="{StaticResource JogButton}" Content="X+"
+                                       Command="{Binding JogCommand}" CommandParameter="X+" />
+                            <ui:Button Grid.Row="2" Grid.Column="1" Style="{StaticResource JogButton}" Content="Y−"
+                                       Command="{Binding JogCommand}" CommandParameter="Y-" />
+                            <ui:Button Grid.Row="0" Grid.Column="4" Style="{StaticResource JogButton}" Content="Z+"
+                                       Command="{Binding JogCommand}" CommandParameter="Z+" />
+                            <ui:Button Grid.Row="1" Grid.Column="4" Style="{StaticResource JogButton}" Appearance="Secondary"
+                                       Content="⌂Z" Command="{Binding HomeCommand}" CommandParameter="Z" ToolTip="{DynamicResource S.HomeZTip}" />
+                            <ui:Button Grid.Row="2" Grid.Column="4" Style="{StaticResource JogButton}" Content="Z−"
+                                       Command="{Binding JogCommand}" CommandParameter="Z-" />
+                        </Grid>
+
+                        <WrapPanel Margin="0,8,0,0" IsEnabled="{Binding CanControl}">
+                            <ui:Button Style="{StaticResource SmallButton}" Appearance="Primary" Icon="{ui:SymbolIcon Home24}"
+                                       Content="{DynamicResource S.HomeAll}" Command="{Binding HomeCommand}" CommandParameter="" />
+                            <ui:Button Style="{StaticResource SmallButton}" Content="X" Command="{Binding HomeCommand}" CommandParameter="X"
+                                       ToolTip="G28 X" />
+                            <ui:Button Style="{StaticResource SmallButton}" Content="Y" Command="{Binding HomeCommand}" CommandParameter="Y"
+                                       ToolTip="G28 Y" />
+                            <ui:Button Style="{StaticResource SmallButton}" Content="{DynamicResource S.MotorsOff}" Command="{Binding MotorsOffCommand}"
+                                       ToolTip="M84" />
+                        </WrapPanel>
+
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.FeedXY}" Margin="0,0,6,0" />
+                            <ui:NumberBox Grid.Column="1" Value="{Binding JogFeedXY, Mode=TwoWay}" Minimum="60" Maximum="12000"
+                                          SmallChange="300" MaxDecimalPlaces="0" ClearButtonEnabled="False"
+                                          SpinButtonPlacementMode="Hidden" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="Z" Margin="10,0,6,0" />
+                            <ui:NumberBox Grid.Column="3" Value="{Binding JogFeedZ, Mode=TwoWay}" Minimum="10" Maximum="1200"
+                                          SmallChange="60" MaxDecimalPlaces="0" ClearButtonEnabled="False"
+                                          SpinButtonPlacementMode="Hidden" />
+                        </Grid>
                     </StackPanel>
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6">
-                        <Run Text="{DynamicResource S.CurrentStep}" />
-                        <Run Text="{Binding JogStep, Mode=OneWay}" FontWeight="SemiBold" />
-                        <Run Text="{DynamicResource S.StepNote}" />
-                    </TextBlock>
+                </ui:Card>
 
-                    <Grid HorizontalAlignment="Left" IsEnabled="{Binding CanControl}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="16" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <ui:Button Grid.Row="0" Grid.Column="1" Style="{StaticResource JogButton}" Content="Y+"
-                                   Command="{Binding JogCommand}" CommandParameter="Y+" />
-                        <ui:Button Grid.Row="1" Grid.Column="0" Style="{StaticResource JogButton}" Content="X−"
-                                   Command="{Binding JogCommand}" CommandParameter="X-" />
-                        <ui:Button Grid.Row="1" Grid.Column="1" Style="{StaticResource JogButton}" Appearance="Secondary"
-                                   Icon="{ui:SymbolIcon Home24}" Command="{Binding HomeCommand}" CommandParameter="XY"
-                                   ToolTip="{DynamicResource S.HomeXYTip}" />
-                        <ui:Button Grid.Row="1" Grid.Column="2" Style="{StaticResource JogButton}" Content="X+"
-                                   Command="{Binding JogCommand}" CommandParameter="X+" />
-                        <ui:Button Grid.Row="2" Grid.Column="1" Style="{StaticResource JogButton}" Content="Y−"
-                                   Command="{Binding JogCommand}" CommandParameter="Y-" />
-                        <ui:Button Grid.Row="0" Grid.Column="4" Style="{StaticResource JogButton}" Content="Z+"
-                                   Command="{Binding JogCommand}" CommandParameter="Z+" />
-                        <ui:Button Grid.Row="1" Grid.Column="4" Style="{StaticResource JogButton}" Appearance="Secondary"
-                                   Content="⌂Z" Command="{Binding HomeCommand}" CommandParameter="Z" ToolTip="{DynamicResource S.HomeZTip}" />
-                        <ui:Button Grid.Row="2" Grid.Column="4" Style="{StaticResource JogButton}" Content="Z−"
-                                   Command="{Binding JogCommand}" CommandParameter="Z-" />
-                    </Grid>
+                <!-- Position -->
+                <ui:Card Style="{StaticResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.PositionTitle}" />
+                        <UniformGrid Columns="4">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Label}" Text="X" />
+                                <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosX, StringFormat={}{0:0.00}}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Label}" Text="Y" />
+                                <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosY, StringFormat={}{0:0.00}}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Label}" Text="Z" />
+                                <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosZ, StringFormat={}{0:0.00}}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource Label}" Text="E" />
+                                <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosE, StringFormat={}{0:0.00}}" />
+                            </StackPanel>
+                        </UniformGrid>
+                        <ui:Button Margin="0,8,0,0" Icon="{ui:SymbolIcon ArrowSync24}" Content="{DynamicResource S.Refresh}"
+                                   Command="{Binding GetPositionCommand}" />
+                    </StackPanel>
+                </ui:Card>
 
-                    <WrapPanel Margin="0,8,0,0" IsEnabled="{Binding CanControl}">
-                        <ui:Button Style="{StaticResource SmallButton}" Appearance="Primary" Icon="{ui:SymbolIcon Home24}"
-                                   Content="{DynamicResource S.HomeAll}" Command="{Binding HomeCommand}" CommandParameter="" />
-                        <ui:Button Style="{StaticResource SmallButton}" Content="X" Command="{Binding HomeCommand}" CommandParameter="X"
-                                   ToolTip="G28 X" />
-                        <ui:Button Style="{StaticResource SmallButton}" Content="Y" Command="{Binding HomeCommand}" CommandParameter="Y"
-                                   ToolTip="G28 Y" />
-                        <ui:Button Style="{StaticResource SmallButton}" Content="{DynamicResource S.MotorsOff}" Command="{Binding MotorsOffCommand}"
-                                   ToolTip="M84" />
-                    </WrapPanel>
+                <!-- Extruder -->
+                <ui:Card Style="{StaticResource PanelCard}">
+                    <StackPanel IsEnabled="{Binding CanControl}">
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Extruder}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.LengthMm}" Margin="0,0,6,0" />
+                            <ui:NumberBox Grid.Column="1" Value="{Binding ExtrudeLength, Mode=TwoWay}" Minimum="0.1" Maximum="200"
+                                          SmallChange="1" MaxDecimalPlaces="1" ClearButtonEnabled="False"
+                                          SpinButtonPlacementMode="Hidden" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="{DynamicResource S.MmPerMin}" Margin="10,0,6,0" />
+                            <ui:NumberBox Grid.Column="3" Value="{Binding ExtrudeFeed, Mode=TwoWay}" Minimum="10" Maximum="3000"
+                                          SmallChange="60" MaxDecimalPlaces="0" ClearButtonEnabled="False"
+                                          SpinButtonPlacementMode="Hidden" />
+                        </Grid>
+                        <WrapPanel Margin="0,8,0,0">
+                            <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowDown24}" Content="{DynamicResource S.Extrude}"
+                                       Command="{Binding ExtrudeCommand}" />
+                            <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowUp24}" Content="{DynamicResource S.Retract}"
+                                       Command="{Binding RetractCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ui:Card>
 
-                    <Grid Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.FeedXY}" Margin="0,0,6,0" />
-                        <ui:NumberBox Grid.Column="1" Value="{Binding JogFeedXY, Mode=TwoWay}" Minimum="60" Maximum="12000"
-                                      SmallChange="300" MaxDecimalPlaces="0" ClearButtonEnabled="False"
-                                      SpinButtonPlacementMode="Hidden" />
-                        <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="Z" Margin="10,0,6,0" />
-                        <ui:NumberBox Grid.Column="3" Value="{Binding JogFeedZ, Mode=TwoWay}" Minimum="10" Maximum="1200"
-                                      SmallChange="60" MaxDecimalPlaces="0" ClearButtonEnabled="False"
-                                      SpinButtonPlacementMode="Hidden" />
-                    </Grid>
-                </StackPanel>
-            </ui:Card>
+                <!-- Fan, speed, flow -->
+                <ui:Card Style="{StaticResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.FanSpeedFlow}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-            <!-- Position -->
+                            <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.Fan}" />
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding FanPercent}" VerticalAlignment="Center"
+                                    IsSnapToTickEnabled="True" TickFrequency="5" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="{Binding FanPercent, StringFormat={}{0}%}"
+                                       HorizontalAlignment="Right" />
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="6,2,0,2">
+                                <ui:Button Padding="8,4" Content="{DynamicResource S.On}" Command="{Binding FanOnCommand}" ToolTip="M106" />
+                                <ui:Button Padding="8,4" Margin="4,0,0,0" Content="{DynamicResource S.Off}" Command="{Binding FanOffCommand}" ToolTip="M107" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="{DynamicResource S.Speed}" />
+                            <Slider Grid.Row="1" Grid.Column="1" Minimum="10" Maximum="300" Value="{Binding SpeedFactor}"
+                                    VerticalAlignment="Center" IsSnapToTickEnabled="True" TickFrequency="5" />
+                            <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource Label}"
+                                       Text="{Binding SpeedFactor, StringFormat={}{0}%}" HorizontalAlignment="Right" />
+                            <ui:Button Grid.Row="1" Grid.Column="3" Margin="6,2,0,2" Padding="8,4" Content="{DynamicResource S.Apply}"
+                                       Command="{Binding ApplySpeedCommand}" ToolTip="{DynamicResource S.SpeedTip}" />
+
+                            <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="{DynamicResource S.Flow}" />
+                            <Slider Grid.Row="2" Grid.Column="1" Minimum="10" Maximum="300" Value="{Binding FlowFactor}"
+                                    VerticalAlignment="Center" IsSnapToTickEnabled="True" TickFrequency="1" />
+                            <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource Label}"
+                                       Text="{Binding FlowFactor, StringFormat={}{0}%}" HorizontalAlignment="Right" />
+                            <ui:Button Grid.Row="2" Grid.Column="3" Margin="6,2,0,2" Padding="8,4" Content="{DynamicResource S.Apply}"
+                                       Command="{Binding ApplyFlowCommand}" ToolTip="{DynamicResource S.FlowTip}" />
+                        </Grid>
+                    </StackPanel>
+                </ui:Card>
+            </StackPanel>
+
+            <!-- Keyboard and gamepad: switchable offline too -->
             <ui:Card Style="{StaticResource PanelCard}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.PositionTitle}" />
-                    <UniformGrid Columns="4">
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource Label}" Text="X" />
-                            <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosX, StringFormat={}{0:0.00}}" />
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource Label}" Text="Y" />
-                            <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosY, StringFormat={}{0:0.00}}" />
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource Label}" Text="Z" />
-                            <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosZ, StringFormat={}{0:0.00}}" />
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource Label}" Text="E" />
-                            <TextBlock Style="{StaticResource BigValue}" FontSize="17" Text="{Binding PosE, StringFormat={}{0:0.00}}" />
-                        </StackPanel>
-                    </UniformGrid>
-                    <ui:Button Margin="0,8,0,0" Icon="{ui:SymbolIcon ArrowSync24}" Content="{DynamicResource S.Refresh}"
-                               Command="{Binding GetPositionCommand}" />
-                </StackPanel>
-            </ui:Card>
-
-            <!-- Extruder -->
-            <ui:Card Style="{StaticResource PanelCard}">
-                <StackPanel IsEnabled="{Binding CanControl}">
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.Extruder}" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.LengthMm}" Margin="0,0,6,0" />
-                        <ui:NumberBox Grid.Column="1" Value="{Binding ExtrudeLength, Mode=TwoWay}" Minimum="0.1" Maximum="200"
-                                      SmallChange="1" MaxDecimalPlaces="1" ClearButtonEnabled="False"
-                                      SpinButtonPlacementMode="Hidden" />
-                        <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="{DynamicResource S.MmPerMin}" Margin="10,0,6,0" />
-                        <ui:NumberBox Grid.Column="3" Value="{Binding ExtrudeFeed, Mode=TwoWay}" Minimum="10" Maximum="3000"
-                                      SmallChange="60" MaxDecimalPlaces="0" ClearButtonEnabled="False"
-                                      SpinButtonPlacementMode="Hidden" />
-                    </Grid>
-                    <WrapPanel Margin="0,8,0,0">
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowDown24}" Content="{DynamicResource S.Extrude}"
-                                   Command="{Binding ExtrudeCommand}" />
-                        <ui:Button Style="{StaticResource SmallButton}" Icon="{ui:SymbolIcon ArrowUp24}" Content="{DynamicResource S.Retract}"
-                                   Command="{Binding RetractCommand}" />
-                    </WrapPanel>
-                </StackPanel>
-            </ui:Card>
-
-            <!-- Fan, speed, flow -->
-            <ui:Card Style="{StaticResource PanelCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.FanSpeedFlow}" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="70" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="44" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Style="{StaticResource Label}" Text="{DynamicResource S.Fan}" />
-                        <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding FanPercent}" VerticalAlignment="Center"
-                                IsSnapToTickEnabled="True" TickFrequency="5" />
-                        <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="{Binding FanPercent, StringFormat={}{0}%}"
-                                   HorizontalAlignment="Right" />
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="6,2,0,2">
-                            <ui:Button Padding="8,4" Content="{DynamicResource S.On}" Command="{Binding FanOnCommand}" ToolTip="M106" />
-                            <ui:Button Padding="8,4" Margin="4,0,0,0" Content="{DynamicResource S.Off}" Command="{Binding FanOffCommand}" ToolTip="M107" />
-                        </StackPanel>
-
-                        <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="{DynamicResource S.Speed}" />
-                        <Slider Grid.Row="1" Grid.Column="1" Minimum="10" Maximum="300" Value="{Binding SpeedFactor}"
-                                VerticalAlignment="Center" IsSnapToTickEnabled="True" TickFrequency="5" />
-                        <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource Label}"
-                                   Text="{Binding SpeedFactor, StringFormat={}{0}%}" HorizontalAlignment="Right" />
-                        <ui:Button Grid.Row="1" Grid.Column="3" Margin="6,2,0,2" Padding="8,4" Content="{DynamicResource S.Apply}"
-                                   Command="{Binding ApplySpeedCommand}" ToolTip="{DynamicResource S.SpeedTip}" />
-
-                        <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="{DynamicResource S.Flow}" />
-                        <Slider Grid.Row="2" Grid.Column="1" Minimum="10" Maximum="300" Value="{Binding FlowFactor}"
-                                VerticalAlignment="Center" IsSnapToTickEnabled="True" TickFrequency="1" />
-                        <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource Label}"
-                                   Text="{Binding FlowFactor, StringFormat={}{0}%}" HorizontalAlignment="Right" />
-                        <ui:Button Grid.Row="2" Grid.Column="3" Margin="6,2,0,2" Padding="8,4" Content="{DynamicResource S.Apply}"
-                                   Command="{Binding ApplyFlowCommand}" ToolTip="{DynamicResource S.FlowTip}" />
-                    </Grid>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="{DynamicResource S.InputTitle}" />
+                    <CheckBox Content="{DynamicResource S.KeyboardControl}" IsChecked="{Binding KeyboardControl}"
+                              MinWidth="0" ToolTip="{DynamicResource S.KeyboardControlTip}" />
+                    <CheckBox Content="{DynamicResource S.GamepadControl}" IsChecked="{Binding GamepadControl}"
+                              MinWidth="0" Margin="0,4,0,0" ToolTip="{DynamicResource S.GamepadControlTip}" />
+                    <TextBlock Style="{StaticResource Label}" Text="{Binding GamepadStatus}" Margin="0,6,0,0" />
+                    <TextBlock Style="{StaticResource Hint}" Text="{DynamicResource S.InputKeysHelp}" Margin="0,8,0,0" />
+                    <TextBlock Style="{StaticResource Hint}" Text="{DynamicResource S.InputPadHelp}" Margin="0,6,0,0" />
                 </StackPanel>
             </ui:Card>
         </StackPanel>

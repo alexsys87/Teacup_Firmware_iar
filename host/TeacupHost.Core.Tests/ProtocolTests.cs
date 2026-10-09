@@ -116,6 +116,23 @@ public class ProtocolTests
         Assert.Equal("M117 ??????", PrinterConnection.ToAscii("M117 Привет"));
 
     [Fact]
+    public async Task QueuedCommandsCountsLinesNotWrittenYet()
+    {
+        using var printer = new VirtualPrinter { TimeScale = 100 };
+        using var conn = new PrinterConnection();
+        Assert.Equal(0, conn.QueuedCommands);
+        conn.Connect(printer);
+        await WaitFor(() => conn.State == ConnectionState.Online);
+        await WaitFor(() => conn.QueuedCommands == 0);
+
+        // The link sends one line and waits for its "ok": the rest stays queued for a moment.
+        for (int i = 0; i < 20; i++)
+            conn.Send("G4 P0");
+        Assert.True(conn.QueuedCommands > 0);
+        await WaitFor(() => conn.QueuedCommands == 0);
+    }
+
+    [Fact]
     public async Task ConnectsAndGetsTemperature()
     {
         using var printer = new VirtualPrinter { TimeScale = 100 };

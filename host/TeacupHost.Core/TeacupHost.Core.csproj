@@ -12,4 +12,8 @@
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TeacupHost.Core.Tests" />
+  </ItemGroup>
+
 </Project>
