@@ -263,9 +263,18 @@ public sealed partial class MainViewModel
         SendJog(a == 'X' ? d : 0, a == 'Y' ? d : 0, a == 'Z' ? d : 0, feed, poll: true);
     }
 
+    /// <summary>
+    /// A jog or an extrusion is four lines at most. This many lines waiting are two jogs: more
+    /// clicks are ignored, otherwise every click is a move that waits in the queue and the machine
+    /// runs on for seconds after the last one (40 fast clicks were 128 lines and 6.7 s).
+    /// </summary>
+    private const int MaxQueuedJogLines = 8;
+
     /// <summary>A relative move of one or more axes (G91, G1, G90), used by the buttons, the keyboard and the gamepad.</summary>
     private void SendJog(double x, double y, double z, double feed, bool poll)
     {
+        if (_conn.QueuedCommands >= MaxQueuedJogLines)
+            return;
         var axes = new List<string>(3);
         if (x != 0)
             axes.Add("X" + N(x));
@@ -285,6 +294,8 @@ public sealed partial class MainViewModel
     /// <param name="interactive">Ask before extruding cold (buttons). Keys and the gamepad can't answer a dialog: they only warn.</param>
     private void Extrude(double length, bool interactive = true)
     {
+        if (_conn.QueuedCommands >= MaxQueuedJogLines)
+            return;
         if (HotendTemp < 170)
         {
             if (!interactive)
