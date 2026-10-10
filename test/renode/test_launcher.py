@@ -305,5 +305,19 @@ class LauncherTests(unittest.TestCase):
                 self.assertRegex(text, r'rng: Miscellaneous\.STM32_RNG @ sysbus 0x50060800\s+'
                                        r'series: STM32Series\.F4\s+-> nvic@80')
 
+    def test_spi_platform_compatibility(self):
+        # Pinned upstream STM32F4 uses the required series selector and
+        # DMAReceive output; preserve project addresses and DMA connection.
+        platforms = list(Path(__file__).parent.glob('stm32f4*.repl'))
+        self.assertEqual(len(platforms), 6)
+        for platform in platforms:
+            with self.subTest(spi_platform=platform.name):
+                text = platform.read_text()
+                for port, address in ((1, '40013000'), (2, '40003800'), (3, '40003C00')):
+                    self.assertRegex(text, rf'spi{port}: SPI\.STM32SPI @ sysbus 0x{address}\s+'
+                                           r'series: STM32Series\.F4')
+                self.assertNotIn('DMARecieve', text)
+                self.assertIn('DMAReceive->dma1@3', text)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
