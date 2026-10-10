@@ -154,6 +154,10 @@ public class ProtocolTests
         int resends = 0;
         int last = -1;
         bool ordered = true;
+        var log = new List<string>();
+        conn.Info += (m, d) => { lock (log) log.Add("! " + m + " " + d); };
+        conn.LineReceived += l => { lock (log) log.Add("< " + l); };
+        conn.LineSent += (l, k) => { lock (log) log.Add("> " + k + " " + l); };
         conn.LineSent += (_, kind) => { if (kind == SendKind.Resend) resends++; };
         conn.JobProgress += i => { if (i <= last) ordered = false; last = i; };
         conn.JobCompleted += (_, c) => cancelled = c;
@@ -162,6 +166,8 @@ public class ProtocolTests
         conn.StartJob(job);
         await WaitFor(() => cancelled != null, 60);
 
+        if (cancelled != false)
+            lock (log) Assert.Fail(string.Join("\n", log.TakeLast(100)));
         Assert.False(cancelled);
         Assert.True(resends > 0, "error injection should cause resends");
         Assert.True(ordered);

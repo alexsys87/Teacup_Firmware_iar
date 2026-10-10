@@ -64,7 +64,7 @@ jobs:
             dotnet test "$env:TEST_PROJECT_PATH" `
               --configuration ${{ matrix.configuration }} `
               --no-build --no-restore `
-              --filter "FullyQualifiedName=TeacupHost.Core.Tests.TelnetTests.PrintsOverTelnetAndReconnectsAfterDrop" `
+              --filter "FullyQualifiedName=TeacupHost.Core.Tests.TelnetTests.PrintsOverTelnetAndReconnectsAfterDrop|FullyQualifiedName=TeacupHost.Core.Tests.ProtocolTests.PrintsJobWithResends" `
               --logger "trx;LogFileName=Telnet-${{ matrix.configuration }}-$iteration.trx" `
               --results-directory TestResults
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
