@@ -55,7 +55,8 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(run_renode(executable, script, 10), '')
             self.assertEqual(start.call_args.args[0],
                              [executable, '--console', '--disable-gui', '-e',
-                              'include "C:/Teacup source with spaces/test/results/run.resc"'])
+                              'include "C:/Teacup source with spaces/test/results/run.resc"',
+                              '-e', 'quit'])
             self.assertFalse(start.call_args.kwargs.get('shell', False))
             start.return_value.wait.assert_called_once_with(timeout=10)
             start.return_value.stdin.close.assert_called_once()
@@ -122,6 +123,24 @@ class LauncherTests(unittest.TestCase):
                                     log, root, 10, dict(os.environ)), 7)
             self.assertEqual(logged([sys.executable, '-c', 'import time; time.sleep(30)'],
                                     log, root, 1, dict(os.environ)), 124)
+
+    def test_monitor_error_with_zero_exit_is_failure(self):
+        with tempfile.TemporaryDirectory(prefix='teacup error spaces ') as root, \
+             patch.dict(os.environ, TEACUP_LOG_DIR=root):
+            fake = Path(root) / 'failed_monitor.py'
+            fake.write_text('import sys\n'
+                            'commands=[sys.argv[i+1] for i,x in enumerate(sys.argv) if x=="-e"]\n'
+                            'assert len(commands)==2 and commands[-1]=="quit"\n'
+                            'print("There was an error executing command include")\n'
+                            'print("Could not tokenize here:")\n')
+            popen = subprocess.Popen
+            def start(argv, **kwargs):
+                return popen([sys.executable, str(fake)] + argv[1:], **kwargs)
+            with patch('renode_common.subprocess.Popen', side_effect=start):
+                with self.assertRaises(SystemExit) as failure:
+                    run_renode('fake', str(Path(root) / 'bad script.resc'), 10)
+                self.assertEqual(failure.exception.code, 1)
+            self.assertIn('Could not tokenize here', Path(artifact_path('renode.log')).read_text())
 
     def test_every_selected_script_runs_bounded_renode(self):
         # Catch accidental loss of the emulator invocation during portability
