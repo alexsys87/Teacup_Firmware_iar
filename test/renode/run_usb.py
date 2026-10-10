@@ -132,7 +132,7 @@ cmd('sysbus.usb Stats')
 mark('end')
 cmd('quit')
 
-script = os.path.join('/tmp', 'teacup_usb_%d.resc' % os.getpid())
+script = artifact_path('teacup_usb_%d.resc' % os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
 out = run_renode(RENODE, script)
 out = re.sub(r'\x1b\[[0-9;]*m', '', out)

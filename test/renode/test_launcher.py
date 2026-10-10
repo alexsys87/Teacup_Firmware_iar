@@ -2,12 +2,18 @@
 import contextlib
 import ast
 import json
+import ntpath
 import os
 from pathlib import Path
+import runpy
+import shutil
+import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import sys
+import warnings
 
 from launch_tests import logged, plan
 from renode_common import artifact_path, monitor_command, run_renode
@@ -36,6 +42,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(monitor_command('echo "@@MARK basic"'), 'echo "@@MARK basic"')
         self.assertEqual(monitor_command("python \"import sys; sys.path.append('C:\\My Folder'); import p3_model\""),
                          "python \"import sys; sys.path.append('C:/My Folder'); import p3_model\"")
+
+    def test_windows_emulator_arguments_remain_separate(self):
+        # Windows CreateProcess must receive separate unquoted argv elements,
+        # not a manually shell-quoted command or backslash-normalized filename.
+        executable = r'C:\Portable tools\Renode\renode.exe'
+        script = r'C:\Teacup source with spaces\test\results\run.resc'
+        with tempfile.TemporaryDirectory(prefix='teacup argv spaces ') as root, \
+             patch.dict(os.environ, TEACUP_LOG_DIR=root), \
+             patch('renode_common.subprocess.Popen') as start:
+            start.return_value.wait.return_value = 0
+            self.assertEqual(run_renode(executable, script, 10), '')
+            self.assertEqual(start.call_args.args[0],
+                             [executable, '--console', '--disable-gui', script])
+            self.assertFalse(start.call_args.kwargs.get('shell', False))
+            start.return_value.wait.assert_called_once_with(timeout=10)
+            start.return_value.stdin.close.assert_called_once()
 
     def test_process_exit_and_timeout(self):
         # Python acts as a fake Renode executable; --console/--disable-gui are
@@ -84,6 +106,103 @@ class LauncherTests(unittest.TestCase):
                                     isinstance(node.func.value, ast.Name) and
                                     node.func.value.id == 'sys' and node.func.attr == 'exit'
                                     for node in calls))
+
+    def test_selected_artifacts_use_windows_results_directory(self):
+        # Evaluate the actual artifact assignments using Windows path rules,
+        # even on Linux. Merely importing artifact_path did not catch the old
+        # os.path.join('/tmp', ...) left in the two baseline scripts.
+        import renode_common
+        root = r'C:\Teacup source with spaces\test\results\F411-baseline-usb'
+        windows_os = SimpleNamespace(path=ntpath, getpid=lambda: 1234,
+                                     environ={'TEACUP_LOG_DIR': root},
+                                     makedirs=lambda *a, **k: None)
+        here = Path(__file__).parent
+        with patch.object(renode_common, 'os', windows_os):
+            for name in {case['script'] for case in plan('All', 'All', 'All', 'all')}:
+                tree = ast.parse((here / name).read_text(encoding='utf-8'))
+                assignments = [node for node in ast.walk(tree)
+                               if isinstance(node, ast.Assign) and
+                               any(isinstance(t, ast.Name) and t.id in ('script', 'REPL', 'repl2')
+                                   for t in node.targets) and
+                               any(isinstance(n, ast.Constant) and isinstance(n.value, str) and
+                                   n.value.endswith(('.resc', '.repl')) for n in ast.walk(node.value))]
+                resc_count = 0
+                for node in assignments:
+                    # ELF/platform input defaults are not generated artifacts.
+                    if isinstance(node.value, ast.IfExp):
+                        continue
+                    if not any(isinstance(n, ast.Constant) and isinstance(n.value, str) and
+                               n.value.endswith('.resc') for n in ast.walk(node.value)) and not any(
+                            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and
+                            n.func.id == 'artifact_path' for n in ast.walk(node.value)):
+                        continue
+                    with self.subTest(script=name, expression=ast.unparse(node.value)):
+                        value = eval(compile(ast.Expression(node.value), name, 'eval'),
+                                     {'os': windows_os, 'artifact_path': artifact_path, 'KIND': 'laser'})
+                        self.assertEqual(ntpath.dirname(value), root)
+                        self.assertNotIn('/tmp', value)
+                        resc_count += value.endswith('.resc')
+                self.assertGreater(resc_count, 0, name)
+
+    def test_actual_suite_generation_with_space_paths(self):
+        # Execute real suite setup and .resc writes, stopping exactly at the
+        # emulator boundary. This tests paths, not firmware assertions; fake
+        # nm data is only the setup fixture, never used by actual test runs.
+        class AtEmulator(Exception):
+            pass
+
+        here = Path(__file__).parent
+        with tempfile.TemporaryDirectory(prefix='teacup source with spaces ') as root:
+            copied = Path(root) / 'test' / 'renode'
+            shutil.copytree(here, copied, ignore=shutil.ignore_patterns('__pycache__'))
+            symbols = ['adc_buffer', 'dda_start', 'temp_dummy_plant',
+                       'temp_dummy_force', 'temp_dummy_fan_loss', 'status_msg']
+            # Pick up additional symbols needed only by individual suites.
+            for name in {case['script'] for case in plan('All', 'All', 'All', 'all')}:
+                tree = ast.parse((copied / name).read_text(encoding='utf-8'))
+                symbols.extend(node.args[0].value for node in ast.walk(tree)
+                               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and
+                               node.func.id == 'sym' and node.args and
+                               isinstance(node.args[0], ast.Constant))
+            def nm(argv, **kwargs):
+                self.assertEqual(argv[0], 'arm-none-eabi-nm')
+                middle = '00000020 B' if '-S' in argv else 'B'
+                return subprocess.CompletedProcess(argv, 0, stdout=''.join(
+                    '20000000 %s %s\n' % (middle, symbol) for symbol in symbols))
+
+            for case in plan('All', 'All', 'All', 'all'):
+                with self.subTest(chip=case['chip'], case=case['name']):
+                    output = Path(root) / 'results' / (case['chip'] + '-' + case['name'])
+                    elf = str(Path(root) / 'firmware with spaces' / 'teacup.elf')
+                    repl = str(copied / ('stm32%s_%s.repl' % (case['chip'].lower(), case['repl'])))
+                    arguments = ['fake renode.exe', elf, repl] + case['args']
+                    if 'kind' in case:
+                        arguments = ['fake renode.exe', case['kind'], elf]
+                    elif case['script'] == 'run_p3steel.py':
+                        arguments.append('84000000')
+                    seen = []
+                    def stop(executable, script, *a, **k):
+                        self.assertEqual(executable, 'fake renode.exe')
+                        path = Path(script)
+                        self.assertEqual(path.parent, output)
+                        self.assertTrue(path.is_file())
+                        text = path.read_text()
+                        self.assertIn('sysbus LoadELF "%s"' % elf.replace('\\', '/'), text)
+                        self.assertNotIn('include @', text)
+                        self.assertNotIn('LoadPlatformDescription @', text)
+                        self.assertIn('quit', text)
+                        seen.append(script)
+                        raise AtEmulator()
+                    with patch.dict(os.environ, TEACUP_LOG_DIR=str(output), TEACUP_PORT=case['port']), \
+                         patch.object(sys, 'argv', [case['script']] + arguments), \
+                         patch('renode_common.run_renode', side_effect=stop), \
+                         patch('subprocess.run', side_effect=nm), \
+                         self.assertRaises(AtEmulator), warnings.catch_warnings():
+                        # Existing suites use short-lived open(...).write(...)
+                        # expressions. Avoid unrelated unittest resource noise.
+                        warnings.simplefilter('ignore', ResourceWarning)
+                        runpy.run_path(str(copied / case['script']), run_name='__main__')
+                    self.assertEqual(len(seen), 1)
 
 
 if __name__ == '__main__':

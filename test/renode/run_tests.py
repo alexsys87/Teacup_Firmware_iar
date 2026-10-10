@@ -451,7 +451,7 @@ if want('safety'):
     mark('end2')
 cmd('quit')
 
-script = os.path.join('/tmp', 'teacup_test_%d.resc' % os.getpid())
+script = artifact_path('teacup_test_%d.resc' % os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
 # Renode's console quits on EOF of stdin, so keep stdin open.
 out = run_renode(RENODE, script)
