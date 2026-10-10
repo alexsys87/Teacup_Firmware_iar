@@ -150,18 +150,24 @@ public class ProtocolTests
         using var printer = new VirtualPrinter { TimeScale = 2000, LineErrorRate = 0.05 };
         using var conn = new PrinterConnection();
         var job = JobFrom(FastPrint());
-        bool? cancelled = null;
+        var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         int resends = 0;
         int last = -1;
         bool ordered = true;
+        var log = new List<string>();
+        conn.Info += (m, d) => { lock (log) log.Add("! " + m + " " + d); };
+        conn.LineReceived += l => { lock (log) log.Add("< " + l); };
+        conn.LineSent += (l, k) => { lock (log) log.Add("> " + k + " " + l); };
         conn.LineSent += (_, kind) => { if (kind == SendKind.Resend) resends++; };
         conn.JobProgress += i => { if (i <= last) ordered = false; last = i; };
-        conn.JobCompleted += (_, c) => cancelled = c;
+        conn.JobCompleted += (_, c) => completed.TrySetResult(c);
         conn.Connect(printer);
         await WaitFor(() => conn.State == ConnectionState.Online);
         conn.StartJob(job);
-        await WaitFor(() => cancelled != null, 60);
+        bool cancelled = await completed.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
+        if (cancelled)
+            lock (log) Assert.Fail(string.Join("\n", log.Take(30).Concat(log.TakeLast(70))));
         Assert.False(cancelled);
         Assert.True(resends > 0, "error injection should cause resends");
         Assert.True(ordered);

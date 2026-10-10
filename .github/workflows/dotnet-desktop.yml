@@ -54,6 +54,22 @@ jobs:
           --logger "trx;LogFileName=TeacupHost-${{ matrix.configuration }}.trx"
           --results-directory TestResults
 
+      # Every iteration must pass: this catches timing regressions, not retries
+      # that hide a failed run. Keep the regular full test suite above intact.
+      - name: Repeat reconnect and resend regressions (10 runs)
+        shell: pwsh
+        run: |
+          for ($iteration = 1; $iteration -le 10; $iteration++) {
+            Write-Host "Reconnect and resend regressions $iteration / 10"
+            dotnet test "$env:TEST_PROJECT_PATH" `
+              --configuration ${{ matrix.configuration }} `
+              --no-build --no-restore `
+              --filter "FullyQualifiedName=TeacupHost.Core.Tests.TelnetTests.PrintsOverTelnetAndReconnectsAfterDrop|FullyQualifiedName=TeacupHost.Core.Tests.ProtocolTests.PrintsJobWithResends" `
+              --logger "trx;LogFileName=Telnet-${{ matrix.configuration }}-$iteration.trx" `
+              --results-directory TestResults
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

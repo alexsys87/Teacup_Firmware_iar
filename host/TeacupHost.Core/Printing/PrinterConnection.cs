@@ -810,6 +810,18 @@ public sealed class PrinterConnection : IDisposable
 
     private void OnPrinterReset()
     {
+        // Opening a serial/TCP/virtual transport can deliver its startup banner
+        // after Connect has already sent M110. Do not queue another M110: its
+        // extra "ok" would acknowledge N1 prematurely and shift every later
+        // acknowledgement. If boot discarded the pending M110, OnTimer retries
+        // it after the normal handshake timeout.
+        if (State == ConnectionState.Connecting && _job == null && !_sdPrinting && !_resync &&
+            _history.Count == 0 && _resendFrom == null && _pendingResendFrom == null &&
+            _inFlight.Count == 1 && _inFlight.First!.Value.LineNumber == 0)
+        {
+            Info?.Invoke(ConnectionMessage.PrinterReset, "");
+            return;
+        }
         bool hadJob = _job != null || _sdPrinting;
         Info?.Invoke(hadJob ? ConnectionMessage.PrinterResetDuringPrint : ConnectionMessage.PrinterReset, "");
         AbortJob();

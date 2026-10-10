@@ -334,6 +334,7 @@ internal sealed class TelnetBridge : IDisposable
     private readonly object _lock = new();
     private TcpClient? _client;
     private volatile bool _running = true;
+    private int _accepted;
 
     public TelnetBridge(VirtualPrinter printer)
     {
@@ -360,7 +361,7 @@ internal sealed class TelnetBridge : IDisposable
     }
 
     public int Port { get; }
-    public int Accepted { get; private set; }
+    public int Accepted => Volatile.Read(ref _accepted);
 
     private void AcceptLoop()
     {
@@ -379,7 +380,7 @@ internal sealed class TelnetBridge : IDisposable
             {
                 _client?.Close();
                 _client = c;
-                Accepted++;
+                Interlocked.Increment(ref _accepted);
             }
             var s = c.GetStream();
             // Telnet servers open with option negotiation (here: echo, SGA,
@@ -480,25 +481,50 @@ public class TelnetTests
             if (c.Length > 0)
                 job.Add(new JobLine(c, i));
         }
-        bool? cancelled = null;
+        var temperatureReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dropped = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         int last = -1;
-        TemperatureReading? temp = null;
-        conn.JobProgress += i => last = i;
-        conn.JobCompleted += (_, c) => cancelled = c;
-        conn.TemperatureUpdated += t => temp = t;
+        int dropStarted = 0;
+        int reconnected = 0;
+        int resumed = 0;
+        conn.JobProgress += i =>
+        {
+            Volatile.Write(ref last, i);
+            // Drop synchronously from the acknowledgement callback, before the
+            // host can send the next command. Polling progress every 10 ms can
+            // miss the entire fast virtual job on a busy CI runner.
+            if (i >= job.Count / 3 && Interlocked.Exchange(ref dropStarted, 1) == 0)
+            {
+                bridge.Drop();
+                dropped.TrySetResult(i);
+            }
+        };
+        conn.JobCompleted += (_, c) => completed.TrySetResult(c);
+        conn.TemperatureUpdated += _ => temperatureReceived.TrySetResult(true);
+        conn.Info += (message, _) =>
+        {
+            if (message == ConnectionMessage.Reconnected)
+                Interlocked.Increment(ref reconnected);
+            if (message == ConnectionMessage.JobResumed)
+                Interlocked.Increment(ref resumed);
+        };
 
         conn.Connect(() => new TcpTransport("127.0.0.1", bridge.Port));
-        await WaitFor(() => conn.State == ConnectionState.Online && temp != null);
+        await WaitFor(() => conn.State == ConnectionState.Online);
+        await temperatureReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal("127.0.0.1:" + bridge.Port, conn.PortName);
 
         conn.StartJob(job);
-        await WaitFor(() => last > job.Count / 3);
-        bridge.Drop();
-        await WaitFor(() => cancelled != null, 90);
+        int droppedAt = await dropped.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        bool cancelled = await completed.Task.WaitAsync(TimeSpan.FromSeconds(90));
 
+        Assert.InRange(droppedAt, job.Count / 3, job.Count - 2);
         Assert.False(cancelled);
-        Assert.Equal(job.Count - 1, last);
+        Assert.Equal(job.Count - 1, Volatile.Read(ref last));
         Assert.True(bridge.Accepted >= 2);
+        Assert.True(Volatile.Read(ref reconnected) >= 1, "The dropped connection must actually reconnect.");
+        Assert.True(Volatile.Read(ref resumed) >= 1, "The interrupted print must actually resume.");
     }
 
     [Fact]
