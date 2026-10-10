@@ -4,6 +4,25 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+
+
+def monitor_errors(text):
+    # Deliberately NOT generic 'Error:': printer thermal-safety responses are
+    # legitimate assertion input. These phrases are Renode monitor failures.
+    return [line for line in text.splitlines() if re.search(
+        r'Error E[0-9]+:|Could not tokenize|Could not resolve type|'
+        r'There was an error executing command|Unhandled [Ee]xception|'
+        r'^\s*FATAL\s*:', line)]
+
+
+def stop_process(proc):
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait()
 
 
 def artifact_path(name):
@@ -32,7 +51,7 @@ def run_renode(executable, script, timeout=None):
         # Execute an explicit quoted include instead; shell quoting alone is
         # insufficient for checkout/results paths containing spaces.
         include = monitor_command('include @' + str(script))
-        # Renode v1.16.0 README documents that -e may be repeated. A second
+        # Renode v1.17.0 README documents that -e may be repeated. A second
         # startup command closes the monitor if include aborts before the
         # script's own quit. It runs AFTER synchronous script execution, so
         # stdin stays open and successful RunFor commands are not interrupted.
@@ -41,15 +60,29 @@ def run_renode(executable, script, timeout=None):
                                 stdin=subprocess.PIPE, stdout=output,
                                 stderr=subprocess.STDOUT)
         try:
-            code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            if os.name == 'nt':
-                subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            proc.kill()
-            proc.wait()
-            print('ERROR: Renode timeout after %s seconds; log: %s' % (timeout, log), file=sys.stderr)
-            raise SystemExit(124)
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    stop_process(proc)
+                    print('ERROR: Renode timeout after %s seconds; log: %s' % (timeout, log), file=sys.stderr)
+                    raise SystemExit(124)
+                try:
+                    code = proc.wait(timeout=min(0.5, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    # Include failures can abort the startup command list
+                    # before the second -e quit, leaving a live prompt. Read
+                    # bounded tail bytes, avoiding repeated full log reads.
+                    with open(log, 'rb') as current:
+                        current.seek(0, os.SEEK_END)
+                        current.seek(max(0, current.tell() - 16384))
+                        errors = monitor_errors(current.read().decode('utf-8', errors='replace'))
+                    if errors:
+                        stop_process(proc)
+                        print('ERROR: Renode monitor/script failure; log: %s' % log, file=sys.stderr)
+                        print('\n'.join(errors[:8])[:3000], file=sys.stderr)
+                        raise SystemExit(1)
         finally:
             proc.stdin.close()
     if code:
@@ -60,9 +93,7 @@ def run_renode(executable, script, timeout=None):
     # The monitor can report a command error but still exit zero after quit.
     # Treat its explicit parser/execution failures as test infrastructure
     # failures, not empty successful emulator output.
-    errors = [line for line in text.splitlines() if re.search(
-        r'Could not tokenize here:|There was an error executing command|'
-        r'Unhandled [Ee]xception|^\s*FATAL\s*:', line)]
+    errors = monitor_errors(text)
     if errors:
         print('ERROR: Renode monitor/script failure; log: %s' % log, file=sys.stderr)
         print('\n'.join(errors[:8])[:3000], file=sys.stderr)

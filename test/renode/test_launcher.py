@@ -4,6 +4,7 @@ import ast
 import json
 import ntpath
 import os
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -43,6 +44,21 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(monitor_command("python \"import sys; sys.path.append('C:\\My Folder'); import p3_model\""),
                          "python \"import sys; sys.path.append('C:/My Folder'); import p3_model\"")
 
+    def test_i2c_types_match_pinned_upstream_stm32f4(self):
+        platforms = list(Path(__file__).parent.glob('stm32f4*.repl'))
+        self.assertEqual(len(platforms), 6)
+        # Exact addresses and IRQ wiring from Renode v1.17.0 stm32f4.repl.
+        for platform in platforms:
+            with self.subTest(platform=platform.name):
+                text = platform.read_text()
+                self.assertNotIn('I2C.STM32F4_I2C', text)
+                blocks = re.findall(r'i2c(\d): I2C.STM32F1_I2C @ sysbus (0x[0-9A-Fa-f]+)\s+'
+                                    r'EventInterrupt -> nvic@(\d+)\s+'
+                                    r'ErrorInterrupt -> nvic@(\d+)', text)
+                self.assertEqual(blocks, [('1', '0x40005400', '31', '32'),
+                                          ('2', '0x40005800', '33', '34'),
+                                          ('3', '0x40005C00', '72', '73')])
+
     def test_windows_emulator_arguments_remain_separate(self):
         # Shell argv quoting does NOT quote Renode's internal positional
         # `i @path` expansion. Explicit -e uses monitor-level quoting instead.
@@ -58,7 +74,8 @@ class LauncherTests(unittest.TestCase):
                               'include "C:/Teacup source with spaces/test/results/run.resc"',
                               '-e', 'quit'])
             self.assertFalse(start.call_args.kwargs.get('shell', False))
-            start.return_value.wait.assert_called_once_with(timeout=10)
+            start.return_value.wait.assert_called_once()
+            self.assertLessEqual(start.return_value.wait.call_args.kwargs['timeout'], 0.5)
             start.return_value.stdin.close.assert_called_once()
 
     def test_process_exit_and_timeout(self):
@@ -141,6 +158,27 @@ class LauncherTests(unittest.TestCase):
                     run_renode('fake', str(Path(root) / 'bad script.resc'), 10)
                 self.assertEqual(failure.exception.code, 1)
             self.assertIn('Could not tokenize here', Path(artifact_path('renode.log')).read_text())
+
+    def test_live_monitor_error_exits_fast_but_printer_error_does_not(self):
+        import time
+        with tempfile.TemporaryDirectory(prefix='teacup live errors ') as root, \
+             patch.dict(os.environ, TEACUP_LOG_DIR=root):
+            fake = Path(root) / 'live_monitor.py'
+            fake.write_text('import sys,time\n'
+                            'if "fatal" in sys.argv[sys.argv.index("-e")+1]:\n'
+                            ' print("Error E04: Could not resolve type: missing",flush=True)\n'
+                            ' time.sleep(30)\n'
+                            'else: print("Error: Heater safety cutoff",flush=True)\n')
+            popen = subprocess.Popen
+            def start(argv, **kwargs):
+                return popen([sys.executable, str(fake)] + argv[1:], **kwargs)
+            with patch('renode_common.subprocess.Popen', side_effect=start):
+                began = time.monotonic()
+                with self.assertRaises(SystemExit) as failure:
+                    run_renode('fake', 'fatal', 20)
+                self.assertEqual(failure.exception.code, 1)
+                self.assertLess(time.monotonic() - began, 5)
+                self.assertIn('Heater safety cutoff', run_renode('fake', 'normal', 10))
 
     def test_every_selected_script_runs_bounded_renode(self):
         # Catch accidental loss of the emulator invocation during portability
