@@ -44,8 +44,8 @@ class LauncherTests(unittest.TestCase):
                          "python \"import sys; sys.path.append('C:/My Folder'); import p3_model\"")
 
     def test_windows_emulator_arguments_remain_separate(self):
-        # Windows CreateProcess must receive separate unquoted argv elements,
-        # not a manually shell-quoted command or backslash-normalized filename.
+        # Shell argv quoting does NOT quote Renode's internal positional
+        # `i @path` expansion. Explicit -e uses monitor-level quoting instead.
         executable = r'C:\Portable tools\Renode\renode.exe'
         script = r'C:\Teacup source with spaces\test\results\run.resc'
         with tempfile.TemporaryDirectory(prefix='teacup argv spaces ') as root, \
@@ -54,7 +54,8 @@ class LauncherTests(unittest.TestCase):
             start.return_value.wait.return_value = 0
             self.assertEqual(run_renode(executable, script, 10), '')
             self.assertEqual(start.call_args.args[0],
-                             [executable, '--console', '--disable-gui', script])
+                             [executable, '--console', '--disable-gui', '-e',
+                              'include "C:/Teacup source with spaces/test/results/run.resc"'])
             self.assertFalse(start.call_args.kwargs.get('shell', False))
             start.return_value.wait.assert_called_once_with(timeout=10)
             start.return_value.stdin.close.assert_called_once()
@@ -65,9 +66,11 @@ class LauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='teacup launcher spaces ') as root:
             with patch.dict(os.environ, TEACUP_LOG_DIR=root):
                 fake = Path(root) / 'fake.py'
-                fake.write_text('import sys,time\nprint("fake output",flush=True)\n'
-                                'if sys.argv[-1]=="timeout": time.sleep(30)\n'
-                                'sys.exit(7 if sys.argv[-1]=="fail" else 0)\n')
+                fake.write_text('import sys,time,shlex\nprint("fake output",flush=True)\n'
+                                'command=sys.argv[sys.argv.index("-e")+1]\n'
+                                'script=shlex.split(command)[1]\n'
+                                'if script=="timeout": time.sleep(30)\n'
+                                'sys.exit(7 if script=="fail" else 0)\n')
                 # run_renode normally passes the executable directly; intercept
                 # only argv to prepend the interpreter to the fake script.
                 import subprocess
@@ -83,6 +86,34 @@ class LauncherTests(unittest.TestCase):
                         run_renode('fake', 'timeout', 1)
                     self.assertEqual(timeout.exception.code, 124)
                 self.assertTrue(Path(artifact_path('renode.log')).is_file())
+
+    def test_monitor_startup_include_with_space_path(self):
+        # Model the concrete Windows CI failure at the second parser boundary:
+        # Renode's positional CLI argument became an unquoted `i @D:\...`.
+        # This real child process rejects that expansion, parses -e using
+        # quoted monitor string syntax, and opens the actual generated file.
+        with tempfile.TemporaryDirectory(prefix='teacup monitor spaces ') as root, \
+             patch.dict(os.environ, TEACUP_LOG_DIR=root):
+            script = Path(root) / 'script with spaces.resc'
+            script.write_text('echo "startup reached"\nquit\n')
+            fake = Path(root) / 'monitor.py'
+            fake.write_text('import sys,shlex,pathlib\n'
+                            'if "-e" not in sys.argv:\n'
+                            ' print("Could not tokenize here: i @"+sys.argv[-1]);sys.exit(9)\n'
+                            'command=sys.argv[sys.argv.index("-e")+1]\n'
+                            'tokens=shlex.split(command)\n'
+                            'assert len(tokens)==2 and tokens[0]=="include"\n'
+                            'print(pathlib.Path(tokens[1]).read_text())\n')
+            popen = subprocess.Popen
+            def start(argv, **kwargs):
+                return popen([sys.executable, str(fake)] + argv[1:], **kwargs)
+            with patch('renode_common.subprocess.Popen', side_effect=start):
+                self.assertIn('startup reached', run_renode('fake', str(script), 10))
+            # Prove the fixture would reject the previously published argv.
+            old = subprocess.run([sys.executable, str(fake), '--console',
+                                  '--disable-gui', str(script)], capture_output=True, text=True)
+            self.assertEqual(old.returncode, 9)
+            self.assertIn('Could not tokenize here', old.stdout)
 
     def test_outer_process_failure_and_timeout(self):
         with tempfile.TemporaryDirectory(prefix='teacup outer spaces ') as root:

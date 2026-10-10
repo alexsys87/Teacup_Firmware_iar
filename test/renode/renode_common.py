@@ -27,7 +27,12 @@ def run_renode(executable, script, timeout=None):
     timeout = timeout or int(os.environ.get('TEACUP_TEST_TIMEOUT_SEC', '1800'))
     log = artifact_path('renode.log')
     with open(log, 'w', encoding='utf-8') as output:
-        proc = subprocess.Popen([executable, '--console', '--disable-gui', script],
+        # Renode expands a positional .resc argument into `i @<path>` WITHOUT
+        # monitor quoting, even when CreateProcess argv was correctly quoted.
+        # Execute an explicit quoted include instead; shell quoting alone is
+        # insufficient for checkout/results paths containing spaces.
+        include = monitor_command('include @' + str(script))
+        proc = subprocess.Popen([executable, '--console', '--disable-gui', '-e', include],
                                 stdin=subprocess.PIPE, stdout=output,
                                 stderr=subprocess.STDOUT)
         try:
