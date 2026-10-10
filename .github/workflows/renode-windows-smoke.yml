@@ -39,6 +39,32 @@ jobs:
         shell: cmd
         working-directory: Teacup source with spaces/test
         run: run-renode.cmd -Suite Baseline -Chip ${{ matrix.chip }} -Part basic,proto -TimeoutSeconds 300
+      - name: Print bounded emulator diagnostics for failed cases
+        if: always()
+        shell: pwsh
+        working-directory: Teacup source with spaces/test
+        run: |
+          if (Test-Path results/summary.json) {
+            $summary = Get-Content results/summary.json -Raw | ConvertFrom-Json
+            foreach ($case in $summary) {
+              if ($case.exit_code -ne 0) {
+                Write-Host "Failed case: $($case.case), exit $($case.exit_code)"
+                $log = Join-Path (Join-Path results $case.case) renode.log
+                if (Test-Path $log) {
+                  Write-Host "--- renode.log first 25 lines ---"
+                  Get-Content -LiteralPath $log -TotalCount 25
+                  Write-Host "--- renode.log last 60 lines ---"
+                  Get-Content -LiteralPath $log -Tail 60
+                }
+              }
+            }
+          } else {
+            Write-Host "No summary yet; printing available emulator log tails."
+            Get-ChildItem results -Filter renode.log -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "--- $($_.FullName) ---"
+              Get-Content -LiteralPath $_.FullName -Tail 60
+            }
+          }
       - name: Upload diagnostic logs, monitor scripts and summary
         if: always()
         uses: actions/upload-artifact@v4
