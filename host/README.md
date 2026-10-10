@@ -64,13 +64,8 @@ dotnet publish TeacupHost -c Release -r win-x64 --self-contained true -p:Publish
 Получается `publish\TeacupHost.exe` (около 75 МБ), его можно просто
 скопировать на другой компьютер.
 
-Тесты ядра (разбор G-кода, построение траектории, протокол с виртуальным
-принтером: Resend, загрузка `M28`/`M29`, печать с flash, `M112`/`M999`,
-`M108`) работают и на Linux:
-
-```
-dotnet test TeacupHost.Core.Tests
-```
+Запуск тестов ядра и описание проверок CI — в
+[TESTING.md](../TESTING.md#проверки-teacup-host).
 
 Проект WPF собирается и на Linux (`EnableWindowsTargeting`), но
 запускается только в Windows 10/11.
