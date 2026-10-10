@@ -56,11 +56,11 @@ jobs:
 
       # Every iteration must pass: this catches timing regressions, not retries
       # that hide a failed run. Keep the regular full test suite above intact.
-      - name: Repeat Telnet reconnect regression (10 runs)
+      - name: Repeat reconnect and resend regressions (10 runs)
         shell: pwsh
         run: |
           for ($iteration = 1; $iteration -le 10; $iteration++) {
-            Write-Host "Telnet reconnect regression $iteration / 10"
+            Write-Host "Reconnect and resend regressions $iteration / 10"
             dotnet test "$env:TEST_PROJECT_PATH" `
               --configuration ${{ matrix.configuration }} `
               --no-build --no-restore `
