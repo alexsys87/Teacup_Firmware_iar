@@ -21,13 +21,15 @@ Checks:
 """
 import os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_1/teacup.elf')
 REPL = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, 'stm32f401_dma.repl')
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send_uart(text):
@@ -132,13 +134,9 @@ cmd('quit')
 
 script = os.path.join('/tmp', 'teacup_usb_%d.resc' % os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script],
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True)
-out = proc.stdout.read()
-proc.wait()
+out = run_renode(RENODE, script)
 out = re.sub(r'\x1b\[[0-9;]*m', '', out)
-open('/tmp/teacup_usb.log', 'w').write(out)
+open(artifact_path('teacup_usb.log'), 'w').write(out)
 
 sections, cur = {}, 'pre'
 for l in out.splitlines():

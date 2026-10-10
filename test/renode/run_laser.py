@@ -21,6 +21,8 @@ Spindle:
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 KIND = sys.argv[2] if len(sys.argv) > 2 else 'laser'
@@ -53,7 +55,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
     for ch in text:
@@ -109,14 +111,12 @@ else:
     run('1.0'); sample('m5_done')
 cmd('quit')
 
-script = '/tmp/teacup_laser_%s_%d.resc' % (KIND, os.getpid())
+script = artifact_path('teacup_laser_%s_%d.resc') % (KIND, os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
 # stdin stays open: at EOF on stdin Renode's console queues input events
 # without end and runs out of memory.
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/teacup_laser_%s.log' % KIND, 'w').write(out)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('teacup_laser_%s.log') % KIND, 'w').write(out)
 os.remove(script)
 
 V = {}

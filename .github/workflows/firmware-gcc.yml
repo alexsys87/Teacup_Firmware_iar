@@ -1,0 +1,38 @@
+name: Production firmware (GCC)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        chip: [F401C, F401E, F411E]
+        config: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM GCC and newlib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi
+          arm-none-eabi-gcc --version
+      - name: Build and validate production firmware
+        run: make -j2 CHIP=${{ matrix.chip }} CONFIG=${{ matrix.config }}
+      - name: Upload firmware and map
+        uses: actions/upload-artifact@v4
+        with:
+          name: teacup-${{ matrix.chip }}-${{ matrix.config }}
+          if-no-files-found: error
+          path: |
+            build/gcc/${{ matrix.chip }}/${{ matrix.config }}/teacup.elf
+            build/gcc/${{ matrix.chip }}/${{ matrix.config }}/teacup.hex
+            build/gcc/${{ matrix.chip }}/${{ matrix.config }}/teacup.bin
+            build/gcc/${{ matrix.chip }}/${{ matrix.config }}/teacup.map
+            build/gcc/${{ matrix.chip }}/${{ matrix.config }}/build-options.txt

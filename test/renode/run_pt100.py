@@ -21,6 +21,8 @@ Usage: run_pt100.py [renode] [teacup.elf] [platform.repl]
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0_pt/teacup.elf')
@@ -59,7 +61,7 @@ def pt_r(t):
     return R0 * (1 + A * t + B * t * t + (C * (t - 100) * t ** 3 if t < 0 else 0))
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
@@ -72,7 +74,7 @@ def adc(bed):
 def prop(tag, name):
     cmd('echo "@@%s"' % tag); cmd('sysbus.spi1.max31865 %s' % name)
 
-repl2 = '/tmp/teacup_pt100_%d.repl' % os.getpid()
+repl2 = artifact_path('teacup_pt100_%d.repl') % os.getpid()
 open(repl2, 'w').write('max31865: SPI.TeacupMAX31865 @ spi1\n\ngpioPortC:\n    15 -> max31865@0\n')
 for _m in ('TeacupSTM32DMA.cs', 'TeacupSTM32_UART.cs', 'TeacupSTM32_OTGFS.cs', 'TeacupMAX31865.cs'):
     cmd('include @%s' % os.path.join(HERE, 'models', _m))
@@ -102,12 +104,10 @@ mark('fault'); cmd('sysbus.spi1.max31865 Fault true'); run('5.5')
 mark('end')
 cmd('quit')
 
-script = '/tmp/teacup_pt100_%d.resc' % os.getpid()
+script = artifact_path('teacup_pt100_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/teacup_pt100.log', 'w').write(out)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('teacup_pt100.log'), 'w').write(out)
 
 sections, cur = {}, 'pre'
 for l in out.splitlines():

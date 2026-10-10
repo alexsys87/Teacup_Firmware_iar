@@ -8,6 +8,8 @@ Usage: run_spiflash.py [renode] [teacup.elf] [platform.repl]
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
@@ -32,7 +34,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(n): cmd('echo "@@MARK %s"' % n)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(t):
@@ -100,11 +102,10 @@ mark('m503b'); send('M503\n'); run('0.1')
 mark('end')
 cmd('quit')
 
-open('/tmp/spiflash_test.resc', 'w').write('\n'.join(lines) + '\n')
-p = subprocess.Popen([RENODE, '--console', '--disable-gui', '/tmp/spiflash_test.resc'], stdin=subprocess.PIPE,
-                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', p.stdout.read()); p.wait()
-open('/tmp/spiflash_test.log', 'w').write(out)
+script = artifact_path('spiflash_test.resc')
+open(script, 'w').write('\n'.join(lines) + '\n')
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('spiflash_test.log'), 'w').write(out)
 sections, cur = {}, 'pre'
 for l in out.splitlines():
     m = re.search(r'@+MARK (\S+)', l)

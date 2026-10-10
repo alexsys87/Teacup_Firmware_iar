@@ -1,0 +1,57 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <!-- Never change UpgradeCode: it identifies this product across releases. -->
+  <Package Name="Teacup Host" Manufacturer="alexsys87"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="A80914CB-2B92-435C-A8D4-F7A49321BB23"
+           Scope="perMachine" InstallerVersion="500" Compressed="yes">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of TeacupHost is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Launch Condition="VersionNT64" Message="TeacupHost requires 64-bit Windows." />
+
+    <!-- Advertised EXE shortcuts require a PE icon resource with an .exe name.
+         The published apphost contains the project's Assets/AppIcon.ico. -->
+    <Icon Id="TeacupHost.exe" SourceFile="$(var.PublishDir)\TeacupHost.exe" />
+    <Property Id="ARPPRODUCTICON" Value="TeacupHost.exe" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/alexsys87/Teacup_Firmware_iar" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="TeacupHost is available in the Start menu." />
+    <!-- Preserve a custom installation directory during a major upgrade. -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="PreviousInstallFolder" Root="HKLM"
+                      Key="Software\alexsys87\TeacupHost"
+                      Name="InstallDir" Type="raw" Bitness="always64" />
+    </Property>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="TeacupHost">
+        <Component Id="MainExecutable" Guid="*" Bitness="always64">
+          <File Id="TeacupHostExe" Source="$(var.PublishDir)\TeacupHost.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder"
+                      Name="Teacup Host" WorkingDirectory="INSTALLFOLDER"
+                      Advertise="yes" Icon="TeacupHost.exe" IconIndex="0" />
+          </File>
+        </Component>
+        <Component Id="InstallLocation" Guid="2F72F4B7-A462-46BB-9647-6C81E9707E96" Bitness="always64">
+          <RegistryValue Root="HKLM" Key="Software\alexsys87\TeacupHost"
+                         Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Complete" Title="Teacup Host" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="InstallLocation" />
+      <ComponentGroupRef Id="PublishedFiles" />
+    </Feature>
+    <!-- Minimal UI with a directory chooser, no fabricated license agreement. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+               Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog"
+               Value="WelcomeDlg" Order="2" Condition="1" />
+    </UI>
+  </Package>
+</Wix>

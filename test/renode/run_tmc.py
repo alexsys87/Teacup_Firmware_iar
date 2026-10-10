@@ -23,6 +23,8 @@ Checks:
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0_tmc/teacup.elf')
@@ -33,7 +35,7 @@ repl_src = repl_src.replace('usart6: UART.STM32_UART @ sysbus <0x40011400, +0x10
                             'usart6: UART.TeacupSTM32_UART @ sysbus <0x40011400, +0x100>\n'
                             '    frequency: 84000000\n    IRQ -> nvic@71')
 assert 'TeacupSTM32_UART @ sysbus <0x40011400' in repl_src
-REPL = '/tmp/teacup_tmc_%d.repl' % os.getpid()
+REPL = artifact_path('teacup_tmc_%d.repl') % os.getpid()
 open(REPL, 'w').write(repl_src)
 
 OVERSAMPLE, SLOTS, ADC_MAX = 16, 2, 4095
@@ -62,7 +64,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
@@ -130,15 +132,14 @@ regs('m501', (0,))
 mark('end')
 cmd('quit')
 
-script = '/tmp/teacup_tmc_%d.resc' % os.getpid()
+script = artifact_path('teacup_tmc_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
 # stdin stays open: at EOF on stdin Renode's console queues input events
 # without end and runs out of memory.
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/teacup_tmc.log', 'w').write(out)
-os.remove(script); os.remove(REPL)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('teacup_tmc.log'), 'w').write(out)
+if not os.environ.get('TEACUP_LOG_DIR'):
+    os.remove(script); os.remove(REPL)
 
 sections, cur = {}, 'pre'
 for l in out.splitlines():

@@ -24,6 +24,8 @@ Checks:
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
@@ -41,7 +43,7 @@ ADCBUF = sym('adc_buffer')
 DDA_START = sym('dda_start')
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def run(t): cmd('emulation RunFor "%s"' % t)
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def send(text):
@@ -118,14 +120,12 @@ mark('st'); send('M500\nM502\nM200\nM501\nM200\n'); run('0.3')
 mark('end')
 cmd('quit')
 
-script = '/tmp/quality_test_%d.resc' % os.getpid()
+script = artifact_path('quality_test_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
 # stdin stays open: at EOF on stdin Renode's console queues input events
 # without end and runs out of memory.
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/quality_test.log', 'w').write(out)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('quality_test.log'), 'w').write(out)
 os.remove(script)
 
 sections, cur = {}, 'pre'

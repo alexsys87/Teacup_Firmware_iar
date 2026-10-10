@@ -18,6 +18,8 @@ Usage: run_inductive.py [renode] [teacup.elf] [platform.repl]
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(HERE, 'models')
 sys.path.insert(0, MODELS)
@@ -55,7 +57,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 TAGS = []
 def mark(name):
     """Start a section. Renode's logger (UART output) is asynchronous and
@@ -120,15 +122,11 @@ send('G1 Z10 F600\nM400\n'); run('3.0')
 mark('m401_ok'); send('M401\nM402\n'); run('0.2'); report('end')
 cmd('quit')
 
-script = '/tmp/teacup_inductive_%d.resc' % os.getpid()
+script = artifact_path('teacup_inductive_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script],
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True)
-out = proc.stdout.read()
-proc.wait()
+out = run_renode(RENODE, script)
 out = re.sub(r'\x1b\[[0-9;]*m', '', out)
-open('/tmp/teacup_inductive.log', 'w').write(out)
+open(artifact_path('teacup_inductive.log'), 'w').write(out)
 
 STREAM = [re.sub(r'^.*\] ', '', l) for l in out.splitlines() if 'usart2: [host' in l]
 TAGRE = re.compile(r'^echo:Progress: (\d+)%, remaining 0 min$')

@@ -27,6 +27,8 @@ and for single moves:
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
@@ -50,7 +52,7 @@ ADCBUF = sym('adc_buffer')
 DDA_START = sym('dda_start')
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
     for ch in text:
@@ -112,12 +114,10 @@ send('G1 X%.3f F%d\n' % (100 + D45 - L_LINE, F))
 finish(5.10)
 cmd('quit')
 
-script = '/tmp/lookahead_test_%d.resc' % os.getpid()
+script = artifact_path('lookahead_test_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/lookahead_test.log', 'w').write(out)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('lookahead_test.log'), 'w').write(out)
 
 starts = [float(v) for v in re.findall(r'cpu: LA ([\d.]+)', out)]
 groups = []
