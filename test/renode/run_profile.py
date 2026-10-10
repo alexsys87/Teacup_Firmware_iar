@@ -19,6 +19,8 @@ Workloads:
 import bisect, math, os, re, subprocess, sys
 from collections import Counter, defaultdict
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
@@ -41,7 +43,7 @@ def func(pc):
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S+ \S adc_buffer$', nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def send(text, dev='usart2'):
     for ch in text:
         cmd('sysbus.%s WriteChar 0x%02X' % (dev, ord(ch)))
@@ -104,12 +106,10 @@ cmd('quit')
 if os.environ.get('PROFILE_LOG'):             # evaluate an earlier run only
     out = open(os.environ['PROFILE_LOG']).read()
 else:
-    script = '/tmp/profile_%d.resc' % os.getpid()
+    script = artifact_path('profile_%d.resc') % os.getpid()
     open(script, 'w').write('\n'.join(lines) + '\n')
-    proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-    open('/tmp/profile.log', 'w').write(out)
+    out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+    open(artifact_path('profile.log'), 'w').write(out)
 
 # Group functions into parts of the firmware.
 GROUPS = [
@@ -142,6 +142,13 @@ for l in out.splitlines():
             res[cur][func(int(m.group(1), 16))] += 1
 
 stats = re.findall(r'echo:Step IRQ.*', out)
+# A monitor error may still yield Renode exit code zero. Do not report a
+# successful profile when any requested workload produced no PC samples.
+missing = [name for name in ('idle', 'poly', 'arc', 'fast', 'retract')
+           if not sum(res.get(name, {}).values())]
+if missing:
+    print('ERROR: missing profiling samples: ' + ', '.join(missing), file=sys.stderr)
+    sys.exit(1)
 for name, c in res.items():
     n = sum(c.values())
     g = defaultdict(int)

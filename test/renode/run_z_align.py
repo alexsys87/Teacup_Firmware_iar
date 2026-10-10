@@ -19,6 +19,8 @@ Usage: run_z_align.py [renode] [teacup.elf] [platform.repl]
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(HERE, 'models')
 sys.path.insert(0, MODELS)
@@ -56,7 +58,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 TAGS = []
 def mark(name):
     """Start a section. Renode's logger (UART output) is asynchronous and
@@ -116,15 +118,10 @@ mark('g34'); send('G34\n'); run('120.0'); report('g34')
 mark('g34_pos'); send('M114\n'); run('0.1')
 cmd('quit')
 
-script = '/tmp/teacup_zalign_%d.resc' % os.getpid()
+script = artifact_path('teacup_zalign_%d.resc') % os.getpid()
 open(script, 'w').write('\n'.join(lines) + '\n')
-# Output straight into the log file, it can be watched while running.
-with open('/tmp/teacup_zalign.log', 'w') as logf:
-    proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script],
-                            stdin=subprocess.PIPE, stdout=logf,
-                            stderr=subprocess.STDOUT, text=True)
-    proc.wait()
-out = re.sub(r'\x1b\[[0-9;]*m', '', open('/tmp/teacup_zalign.log').read())
+# The shared runner streams to renode.log and propagates errors/timeouts.
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
 
 STREAM = [re.sub(r'^.*\] ', '', l) for l in out.splitlines() if 'usart2: [host' in l]
 TAGRE = re.compile(r'^echo:Progress: (\d+)%, remaining 0 min$')

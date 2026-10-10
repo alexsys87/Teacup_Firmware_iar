@@ -15,6 +15,8 @@ yet when they're sent.
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_1/teacup.elf')
@@ -40,7 +42,7 @@ FANLOSS = sym('temp_dummy_fan_loss')
 STEP_AUX = sym('la_service') != 0 or sym('shaper_service') != 0
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
@@ -449,16 +451,12 @@ if want('safety'):
     mark('end2')
 cmd('quit')
 
-script = os.path.join('/tmp', 'teacup_test_%d.resc' % os.getpid())
+script = artifact_path('teacup_test_%d.resc' % os.getpid())
 open(script, 'w').write('\n'.join(lines) + '\n')
 # Renode's console quits on EOF of stdin, so keep stdin open.
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script],
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True)
-out = proc.stdout.read()
-proc.wait()
+out = run_renode(RENODE, script)
 out = re.sub(r'\x1b\[[0-9;]*m', '', out)
-open('/tmp/teacup_test_%s.log' % PORT, 'w').write(out)
+open(artifact_path('teacup_test_%s.log') % PORT, 'w').write(out)
 
 # Split log into sections by markers.
 sections, cur = {}, 'pre'

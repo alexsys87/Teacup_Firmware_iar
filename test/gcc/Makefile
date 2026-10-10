@@ -42,7 +42,7 @@ ifeq ($(TEST),1)
 endif
 
 INC := $(addprefix -I$(ROOT)/,cmsis/core cmsis/device config hal core display motion pff src)
-SRC := $(wildcard $(ROOT)/*.c $(ROOT)/cmsis/*.c $(ROOT)/hal/*.c $(ROOT)/core/*.c \
+SRC := $(wildcard $(ROOT)/*.c $(ROOT)/app/*.c $(ROOT)/cmsis/*.c $(ROOT)/hal/*.c $(ROOT)/core/*.c \
                   $(ROOT)/display/*.c $(ROOT)/motion/*.c $(ROOT)/pff/*.c $(ROOT)/src/*.c)
 OBJ := $(addprefix $(BUILD)/,$(notdir $(SRC:.c=.o))) $(BUILD)/startup.o
 

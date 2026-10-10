@@ -26,6 +26,8 @@ Checks:
 """
 import math, os, re, subprocess, sys
 
+from renode_common import artifact_path, monitor_command, run_renode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENODE = sys.argv[1] if len(sys.argv) > 1 else 'renode'
 ELF = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, '../gcc/build_F401_0/teacup.elf')
@@ -57,7 +59,7 @@ _nm = subprocess.run(['arm-none-eabi-nm', ELF], capture_output=True, text=True).
 ADCBUF = int(re.search(r'^([0-9a-f]+) \S adc_buffer$', _nm, re.M).group(1), 16)
 
 lines = []
-def cmd(c): lines.append(c)
+def cmd(c): lines.append(monitor_command(c))
 def mark(name): cmd('echo "@@MARK %s"' % name)
 def run(t): cmd('emulation RunFor "%s"' % t)
 def send(text):
@@ -180,12 +182,10 @@ run('60.0'); pcf('idle62')
 mark('end')
 cmd('quit')
 
-script = '/tmp/motion_extras_test.resc'
+script = artifact_path('motion_extras_test.resc')
 open(script, 'w').write('\n'.join(lines) + '\n')
-proc = subprocess.Popen([RENODE, '--console', '--disable-gui', script], stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-out = re.sub(r'\x1b\[[0-9;]*m', '', proc.stdout.read()); proc.wait()
-open('/tmp/motion_extras_test.log', 'w').write(out)
+out = re.sub(r'\x1b\[[0-9;]*m', '', run_renode(RENODE, script))
+open(artifact_path('motion_extras_test.log'), 'w').write(out)
 
 sections, cur = {}, 'pre'
 for l in out.splitlines():

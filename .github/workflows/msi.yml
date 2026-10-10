@@ -1,0 +1,80 @@
+name: Windows MSI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'MSI version (major.minor.build); empty = 1.0.<run number>'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Build and verify MSI (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      REQUESTED_VERSION: ${{ inputs.version }}
+      MSI_RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Choose installer version
+        id: version
+        shell: pwsh
+        run: |
+          $version = $env:REQUESTED_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = "1.0.$env:MSI_RUN_NUMBER" }
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or $version -eq '0.0.0') {
+            throw 'Use a three-field MSI version greater than 0.0.0.'
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - name: Run core tests
+        shell: pwsh
+        run: |
+          dotnet test host/TeacupHost.Core.Tests/TeacupHost.Core.Tests.csproj -c Release -f net8.0 --logger "trx;LogFileName=msi.trx" --results-directory artifacts/test-results
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish self-contained app and build MSI
+        shell: pwsh
+        env:
+          PRODUCT_VERSION: ${{ steps.version.outputs.value }}
+        run: ./installer/build-msi.ps1 -Version $env:PRODUCT_VERSION
+      - name: Build older package for upgrade verification
+        shell: pwsh
+        run: ./installer/build-msi.ps1 -Version 0.0.0 -SkipPublish -OutputDirectory artifacts/upgrade-baseline
+      - name: Verify install, repair, upgrade, downgrade protection and uninstall
+        shell: pwsh
+        env:
+          PRODUCT_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          ./installer/test-msi.ps1 -Msi "artifacts/msi/TeacupHost-$env:PRODUCT_VERSION-win-x64.msi" -BaselineMsi artifacts/upgrade-baseline/TeacupHost-0.0.0-win-x64.msi -AllowMachineChanges
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: TeacupHost-${{ steps.version.outputs.value }}-win-x64-msi
+          path: |
+            artifacts/msi/*.msi
+            artifacts/msi/*.sha256
+          if-no-files-found: error
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TeacupHost-msi-diagnostics
+          path: |
+            artifacts/test-results/*.trx
+            artifacts/msi-logs/*.log
+          if-no-files-found: warn

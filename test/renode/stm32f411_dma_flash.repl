@@ -115,25 +115,28 @@ rom2: Memory.MappedMemory @ sysbus 0x1FFFC400
     size: 0x3C00
 
 spi1: SPI.STM32SPI @ sysbus 0x40013000
+    series: STM32Series.F4
 
 spiflash: SPI.TeacupW25Q @ spi1
     sizeMB: 8
 
 spi2: SPI.STM32SPI @ sysbus 0x40003800
+    series: STM32Series.F4
     IRQ->nvic@35
-    DMARecieve->dma1@3
+    DMAReceive->dma1@3
 
 spi3: SPI.STM32SPI @ sysbus 0x40003C00
+    series: STM32Series.F4
 
-i2c1: I2C.STM32F4_I2C @ sysbus 0x40005400
+i2c1: I2C.STM32F1_I2C @ sysbus 0x40005400
     EventInterrupt -> nvic@31
     ErrorInterrupt -> nvic@32
 
-i2c2: I2C.STM32F4_I2C @ sysbus 0x40005800
+i2c2: I2C.STM32F1_I2C @ sysbus 0x40005800
     EventInterrupt -> nvic@33
     ErrorInterrupt -> nvic@34
 
-i2c3: I2C.STM32F4_I2C @ sysbus 0x40005C00
+i2c3: I2C.STM32F1_I2C @ sysbus 0x40005C00
     EventInterrupt -> nvic@72
     ErrorInterrupt -> nvic@73
 
@@ -143,7 +146,8 @@ dma1: DMA.TeacupSTM32DMA @ sysbus 0x40026000
 dma2: DMA.TeacupSTM32DMA @ sysbus 0x40026400
     [0-7] -> nvic@[56-60,68-70]
 
-rng: Miscellaneous.STM32F4_RNG @ sysbus 0x50060800
+rng: Miscellaneous.STM32_RNG @ sysbus 0x50060800
+    series: STM32Series.F4
     -> nvic@80
 
 iwdg: Timers.STM32_IndependentWatchdog @ sysbus 0x40003000

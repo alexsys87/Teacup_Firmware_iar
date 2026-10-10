@@ -1,0 +1,45 @@
+name: Renode Windows tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['test/**', 'app/**', 'cmsis/**', 'config/**', 'core/**', 'display/**', 'hal/**', 'motion/**', 'pff/**', 'src/**', '.github/workflows/renode-windows.yml']
+  pull_request:
+    branches: [main]
+    paths: ['test/**', 'app/**', 'cmsis/**', 'config/**', 'core/**', 'display/**', 'hal/**', 'motion/**', 'pff/**', 'src/**', '.github/workflows/renode-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renode:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        chip: [F401, F411]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Teacup source with spaces
+      - uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/Teacup_Firmware/renode-tools
+          key: renode-windows-1.17.0-python-3.12.10-arm-14.3.rel1-make-4.4.1-3-v1
+      - name: Bootstrap and exercise launcher exits, timeouts and paths
+        shell: cmd
+        working-directory: Teacup source with spaces/test
+        run: run-renode.cmd -SelfTest
+      - name: Run real firmware tests over UART and USB plus cross-port USB routing
+        shell: cmd
+        working-directory: Teacup source with spaces/test
+        run: run-renode.cmd -Suite Baseline -Chip ${{ matrix.chip }} -TimeoutSeconds 1800
+      - name: Upload logs, monitor scripts and summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Renode-Windows-${{ matrix.chip }}-logs
+          path: Teacup source with spaces/test/results/
+          if-no-files-found: warn

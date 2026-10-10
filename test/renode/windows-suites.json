@@ -1,0 +1,202 @@
+[
+  {
+    "name": "arcs",
+    "script": "run_arcs.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "calibration",
+    "script": "run_calibration.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "extruders",
+    "script": "run_extruders.py",
+    "test": 0,
+    "extra": "-DEXTRUDERS=2",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "features",
+    "script": "run_features.py",
+    "test": 0,
+    "extra": "-DBLTOUCH",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "inductive",
+    "script": "run_inductive.py",
+    "test": 0,
+    "extra": "-DINDUCTIVE_PROBE",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "input_shaping",
+    "script": "run_input_shaping.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "laser",
+    "script": "run_laser.py",
+    "test": 0,
+    "extra": "-DSPINDLE_LASER -DLASER_MODE",
+    "group": "Features",
+    "args": [],
+    "repl": "dma",
+    "kind": "laser"
+  },
+  {
+    "name": "spindle",
+    "script": "run_laser.py",
+    "test": 0,
+    "extra": "-DSPINDLE_LASER -DSPINDLE_LASER_ENA_PIN=PC_14 -DSPINDLE_DIR_PIN=PC_15",
+    "group": "Features",
+    "args": [],
+    "repl": "dma",
+    "kind": "spindle"
+  },
+  {
+    "name": "linear_advance",
+    "script": "run_linear_advance.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "lookahead",
+    "script": "run_lookahead.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "motion_extras",
+    "script": "run_motion_extras.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "mpc",
+    "script": "run_mpc.py",
+    "test": 1,
+    "extra": "-DHOTEND_MPC",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "p3steel",
+    "script": "run_p3steel.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "power",
+    "script": "run_power.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "power_loss",
+    "script": "run_power_loss.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma_flash"
+  },
+  {
+    "name": "profile",
+    "script": "run_profile.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "pt100",
+    "script": "run_pt100.py",
+    "test": 0,
+    "extra": "-DHOTEND_MAX31865",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "quality",
+    "script": "run_quality.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "speed",
+    "script": "run_speed.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "spiflash",
+    "script": "run_spiflash.py",
+    "test": 0,
+    "extra": "",
+    "group": "P3Steel",
+    "args": [],
+    "repl": "dma_flash"
+  },
+  {
+    "name": "tmc",
+    "script": "run_tmc.py",
+    "test": 0,
+    "extra": "-DTMC_UART=6 -DTMC_UART_TX_PIN=PC_6",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  },
+  {
+    "name": "z_align",
+    "script": "run_z_align.py",
+    "test": 0,
+    "extra": "-DBLTOUCH -DZ_STEPPER_ALIGN",
+    "group": "Features",
+    "args": [],
+    "repl": "dma"
+  }
+]
