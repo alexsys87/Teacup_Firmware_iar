@@ -293,5 +293,17 @@ class LauncherTests(unittest.TestCase):
                     self.assertEqual(len(seen), 1)
 
 
+    def test_rng_platform_compatibility(self):
+        # Exact model, series selector, address and IRQ from upstream
+        # Renode v1.17.0 platforms/cpus/stm32f4.repl.
+        platforms = list(Path(__file__).parent.glob('stm32f4*.repl'))
+        self.assertEqual(len(platforms), 6)
+        for platform in platforms:
+            with self.subTest(rng_platform=platform.name):
+                text = platform.read_text()
+                self.assertNotIn('Miscellaneous.STM32F4_RNG', text)
+                self.assertRegex(text, r'rng: Miscellaneous\.STM32_RNG @ sysbus 0x50060800\s+'
+                                       r'series: STM32Series\.F4\s+-> nvic@80')
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
